@@ -1,0 +1,52 @@
+import { defineStore } from "pinia";
+import axios from "axios";
+
+const api = axios.create({
+  baseURL: import.meta.env.VITE_API_URL || "http://localhost:3001/api",
+  withCredentials: true,
+});
+
+export const useAuthStore = defineStore("auth", {
+  state: () => ({
+    user: null,
+    isAuthenticated: false,
+    loading: false,
+  }),
+
+  getters: {
+    getUser: (state) => state.user,
+    isLoggedIn: (state) => state.isAuthenticated,
+  },
+
+  actions: {
+    async checkAuth() {
+      try {
+        this.loading = true;
+        const response = await api.get("/auth/me");
+        this.user = response.data.user;
+        this.isAuthenticated = true;
+      } catch (error) {
+        this.user = null;
+        this.isAuthenticated = false;
+      } finally {
+        this.loading = false;
+      }
+    },
+
+    async logout() {
+      try {
+        await api.post("/auth/logout");
+        this.user = null;
+        this.isAuthenticated = false;
+        // Rediriger vers la page d'accueil
+        window.location.href = "/";
+      } catch (error) {
+        console.error("Erreur lors de la déconnexion:", error);
+      }
+    },
+
+    loginWithGitHub() {
+      window.location.href = `${import.meta.env.VITE_API_URL}/auth/github`;
+    },
+  },
+});
