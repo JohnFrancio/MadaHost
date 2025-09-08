@@ -11,6 +11,7 @@ const projects = ref([]);
 const githubRepos = ref([]);
 const loadingRepos = ref(false);
 const showNewProjectModal = ref(false);
+const deploying = ref(false);
 
 // Computed
 const activeProjects = computed(
@@ -66,6 +67,24 @@ const onProjectCreated = async (project) => {
 onMounted(async () => {
   await loadProjects();
 });
+
+const deployProject = async (id) => {
+  deploying.value = true;
+  try {
+    const response = await axios.post(`/api/projects/${id}/deploy`);
+    console.log("Déploiement initié:", response.data);
+    // Recharger les données
+    await loadProjects();
+  } catch (error) {
+    console.error("Erreur lors du déploiement:", error);
+    alert(
+      "Erreur lors du déploiement: " +
+        (error.response?.data?.error || error.message)
+    );
+  } finally {
+    deploying.value = false;
+  }
+};
 </script>
 
 <template>
@@ -227,6 +246,7 @@ onMounted(async () => {
           v-for="project in projects"
           :key="project.id"
           class="card hover:shadow-md transition-shadow cursor-pointer"
+          @click="$router.push(`/project/${project.id}`)"
         >
           <div class="flex justify-between items-start mb-4">
             <h3 class="font-semibold text-lg">{{ project.name }}</h3>
@@ -257,22 +277,29 @@ onMounted(async () => {
             <span v-else class="text-gray-400 text-sm">
               En attente de déploiement
             </span>
-
-            <button class="text-gray-500 hover:text-gray-700">
-              <svg
-                class="w-5 h-5"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
+            <div class="flex gap-2">
+              <button
+                @click.stop="deployProject(project.id)"
+                class="bg-blue-600 hover:bg-blue-700 text-white px-2 py-1 rounded text-xs"
               >
-                <path
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  stroke-width="2"
-                  d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z"
-                ></path>
-              </svg>
-            </button>
+                {{ deploying ? "Déploiement..." : "Déployer" }}
+              </button>
+              <button @click.stop class="text-gray-500 hover:text-gray-700">
+                <svg
+                  class="w-5 h-5"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z"
+                  ></path>
+                </svg>
+              </button>
+            </div>
           </div>
         </div>
       </div>

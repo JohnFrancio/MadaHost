@@ -404,15 +404,16 @@ router.delete("/:id", requireAuth, async (req, res) => {
 });
 
 // Déclencher un déploiement
+// Route pour déployer un projet (version améliorée)
 router.post("/:id/deploy", requireAuth, async (req, res) => {
-  try {
-    const { id } = req.params;
+  const projectId = req.params.id;
 
-    // Vérifier que le projet appartient à l'utilisateur
+  try {
+    // 1. Vérifier que le projet appartient à l'utilisateur
     const { data: project, error: projectError } = await supabase
       .from("projects")
       .select("*")
-      .eq("id", id)
+      .eq("id", projectId)
       .eq("user_id", req.user.id)
       .single();
 
@@ -423,12 +424,27 @@ router.post("/:id/deploy", requireAuth, async (req, res) => {
       });
     }
 
-    // Créer un nouveau déploiement
+    // 2. Vérifier qu'il n'y a pas déjà un déploiement en cours
+    const { data: activeDeployments } = await supabase
+      .from("deployments")
+      .select("id")
+      .eq("project_id", projectId)
+      .in("status", ["pending", "building"]);
+
+    if (activeDeployments && activeDeployments.length > 0) {
+      return res.status(409).json({
+        success: false,
+        error: "Un déploiement est déjà en cours pour ce projet",
+        activeDeployment: activeDeployments[0].id,
+      });
+    }
+
+    // 3. Créer un nouveau déploiement
     const { data: deployment, error: deploymentError } = await supabase
       .from("deployments")
       .insert([
         {
-          project_id: id,
+          project_id: projectId,
           status: "pending",
           started_at: new Date().toISOString(),
         },
@@ -441,27 +457,276 @@ router.post("/:id/deploy", requireAuth, async (req, res) => {
       return res.status(500).json({
         success: false,
         error: "Impossible de créer le déploiement",
+        details: deploymentError.message,
       });
     }
 
-    // TODO: Lancer le processus de déploiement en arrière-plan
-    // deployProject(deployment.id, project);
+    // 4. Lancer le déploiement en arrière-plan
+    const DeploymentService = require("../services/deploymentService");
 
-    res.json({
+    // Déploiement asynchrone
+    DeploymentService.deployProject(deployment, project)
+      .then((result) => {
+        console.log("✅ Déploiement réussi:", result);
+      })
+      .catch((error) => {
+        console.error("❌ Déploiement échoué:", error);
+      });
+
+    // 5. Répondre immédiatement avec les infos du déploiement
+    res.status(202).json({
       success: true,
       deployment: {
         id: deployment.id,
         status: "pending",
         started_at: deployment.started_at,
+        project_id: projectId,
       },
-      message: "Déploiement lancé",
+      message: "Déploiement lancé avec succès",
+      tracking: {
+        deploymentId: deployment.id,
+        statusUrl: `/api/deployments/${deployment.id}`,
+        logsUrl: `/api/deployments/${deployment.id}/logs`,
+      },
     });
   } catch (error) {
-    console.error("❌ Erreur déploiement:", error);
+    console.error("❌ Erreur lors du déploiement:", error);
     res.status(500).json({
       success: false,
       error: "Erreur lors du lancement du déploiement",
+      details: error.message,
     });
+  }
+});
+
+// Route pour obtenir le statut d'un déploiement spécifique
+router.get(
+  "/deployments/:deploymentId/status",
+  requireAuth,
+  async (req, res) => {
+    try {
+      const { data: deployment, error } = await supabase
+        .from("deployments")
+        .select(
+          `
+        *,
+        projects!inner(
+          id,
+          name,
+          user_id,
+          domain,
+          github_repo
+        )
+      `
+        )
+        .eq("id", req.params.deploymentId)
+        .eq("projects.user_id", req.user.id)
+        .single();
+
+      if (error || !deployment) {
+        return res.status(404).json({
+          success: false,
+          error: "Déploiement non trouvé",
+        });
+      }
+
+      // Calculer la progression si en cours
+      let progress = 0;
+      let estimatedTimeRemaining = null;
+
+      if (deployment.status === "building") {
+        const startTime = new Date(deployment.started_at);
+        const now = new Date();
+        const elapsedMs = now - startTime;
+        const elapsedMinutes = elapsedMs / (1000 * 60);
+
+        // Progression basée sur le temps (max 5 minutes)
+        progress = Math.min(90, (elapsedMinutes / 5) * 90);
+        estimatedTimeRemaining = Math.max(0, 5 - elapsedMinutes);
+      } else if (deployment.status === "success") {
+        progress = 100;
+      } else if (deployment.status === "failed") {
+        progress = 0;
+      }
+
+      res.json({
+        success: true,
+        deployment: {
+          ...deployment,
+          progress,
+          estimatedTimeRemaining,
+        },
+      });
+    } catch (error) {
+      console.error("❌ Erreur statut déploiement:", error);
+      res.status(500).json({
+        success: false,
+        error: "Erreur lors de la récupération du statut",
+      });
+    }
+  }
+);
+
+// Route pour récupérer UN projet spécifique
+router.get("/:id", requireAuth, async (req, res) => {
+  try {
+    const { data: project, error } = await supabase
+      .from("projects")
+      .select("*")
+      .eq("id", req.params.id)
+      .eq("user_id", req.user.id)
+      .single();
+
+    if (error) {
+      console.error("Erreur Supabase:", error);
+      return res.status(404).json({ error: "Projet non trouvé" });
+    }
+
+    res.json({ project });
+  } catch (error) {
+    console.error("Erreur lors de la récupération du projet:", error);
+    res.status(500).json({ error: "Erreur serveur" });
+  }
+});
+
+// Route pour mettre à jour un projet
+router.put("/:id", requireAuth, async (req, res) => {
+  try {
+    const {
+      install_command,
+      build_command,
+      output_dir,
+      branch,
+      auto_deploy,
+      env_vars,
+    } = req.body;
+
+    const { data: project, error } = await supabase
+      .from("projects")
+      .update({
+        install_command,
+        build_command,
+        output_dir,
+        branch,
+        auto_deploy,
+        env_vars,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", req.params.id)
+      .eq("user_id", req.user.id)
+      .select()
+      .single();
+
+    if (error) {
+      console.error("Erreur Supabase:", error);
+      return res.status(404).json({ error: "Projet non trouvé" });
+    }
+
+    res.json({ project, message: "Projet mis à jour avec succès" });
+  } catch (error) {
+    console.error("Erreur lors de la mise à jour:", error);
+    res.status(500).json({ error: "Erreur serveur" });
+  }
+});
+
+// Route pour supprimer un projet
+router.delete("/:id", requireAuth, async (req, res) => {
+  try {
+    const { error } = await supabase
+      .from("projects")
+      .delete()
+      .eq("id", req.params.id)
+      .eq("user_id", req.user.id);
+
+    if (error) {
+      console.error("Erreur Supabase:", error);
+      return res.status(404).json({ error: "Projet non trouvé" });
+    }
+
+    res.json({ message: "Projet supprimé avec succès" });
+  } catch (error) {
+    console.error("Erreur lors de la suppression:", error);
+    res.status(500).json({ error: "Erreur serveur" });
+  }
+});
+
+// Route pour récupérer les déploiements d'un projet
+router.get("/:id/deployments", requireAuth, async (req, res) => {
+  try {
+    // Vérifier que le projet appartient à l'utilisateur
+    const { data: project } = await supabase
+      .from("projects")
+      .select("id")
+      .eq("id", req.params.id)
+      .eq("user_id", req.user.id)
+      .single();
+
+    if (!project) {
+      return res.status(404).json({ error: "Projet non trouvé" });
+    }
+
+    // Récupérer les déploiements
+    const { data: deployments, error } = await supabase
+      .from("deployments")
+      .select("*")
+      .eq("project_id", req.params.id)
+      .order("started_at", { ascending: false });
+
+    if (error) {
+      console.error("Erreur Supabase:", error);
+      return res.status(500).json({ error: "Erreur serveur" });
+    }
+
+    res.json({ deployments });
+  } catch (error) {
+    console.error("Erreur lors de la récupération des déploiements:", error);
+    res.status(500).json({ error: "Erreur serveur" });
+  }
+});
+
+// Route pour déployer un projet - AMÉLIORATION
+router.post("/:id/deploy", requireAuth, async (req, res) => {
+  const projectId = req.params.id;
+
+  try {
+    // 1. Vérifier que le projet appartient à l'utilisateur
+    const { data: project, error: projectError } = await supabase
+      .from("projects")
+      .select("*")
+      .eq("id", projectId)
+      .eq("user_id", req.user.id)
+      .single();
+
+    if (projectError || !project) {
+      return res.status(404).json({ error: "Projet non trouvé" });
+    }
+
+    // 2. Mettre à jour le statut du projet
+    await supabase
+      .from("projects")
+      .update({ status: "building" })
+      .eq("id", projectId);
+
+    // 3. Déclencher le déploiement en arrière-plan
+    const deploymentService = require("../services/deploymentService");
+
+    // Démarrer le déploiement de façon asynchrone
+    deploymentService
+      .deployProject(projectId)
+      .then((result) => {
+        console.log(`✅ Déploiement réussi pour ${project.name}`);
+      })
+      .catch((error) => {
+        console.error(`❌ Déploiement échoué pour ${project.name}:`, error);
+      });
+
+    res.json({
+      message: "Déploiement initié avec succès",
+      status: "building",
+    });
+  } catch (error) {
+    console.error("Erreur lors de l'initiation du déploiement:", error);
+    res.status(500).json({ error: "Erreur serveur" });
   }
 });
 

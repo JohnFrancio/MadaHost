@@ -62,7 +62,7 @@ window.addEventListener("unhandledrejection", (event) => {
     <Navbar />
 
     <!-- Contenu principal -->
-    <main class="flex-1">
+    <main class="flex-1 my-10">
       <RouterView />
     </main>
 
