@@ -12,7 +12,7 @@ export function useGitHub() {
 
   // Configuration axios avec credentials
   const api = axios.create({
-    baseURL: "http://localhost:3001/api",
+    baseURL: import.meta.env.VITE_API_URL || "http://localhost:3001/api",
     withCredentials: true,
   });
 
@@ -39,16 +39,26 @@ export function useGitHub() {
 
       const response = await api.get("/github/repos", { params: options });
 
+      // 🔧 FIX: Support des deux formats de réponse
       if (response.data.success) {
-        repos.value = response.data.data;
+        repos.value = response.data.data || response.data.repositories || [];
         console.log(`✅ ${repos.value.length} repositories récupérés`);
         return repos.value;
       } else {
-        throw new Error(response.data.error);
+        throw new Error(response.data.error || "Erreur inconnue");
       }
     } catch (err) {
       console.error("❌ Erreur récupération repos:", err);
-      error.value = err.response?.data?.error || err.message;
+
+      // Gestion spécifique des erreurs d'authentification
+      if (err.response?.status === 401) {
+        error.value = "Session expirée. Veuillez vous reconnecter.";
+      } else if (err.response?.status === 400) {
+        error.value = "Token GitHub manquant. Reconnectez-vous avec GitHub.";
+      } else {
+        error.value = err.response?.data?.error || err.message;
+      }
+
       repos.value = [];
       return [];
     } finally {
@@ -182,14 +192,18 @@ export function useGitHub() {
     } catch (err) {
       console.error("❌ Erreur détection framework:", err);
       error.value = err.response?.data?.error || err.message;
+
+      // Retourner une configuration par défaut pour éviter les erreurs
       return {
-        framework: "Inconnu",
-        confidence: 0,
+        framework: "Node.js/JavaScript",
+        confidence: 0.5,
         buildConfig: {
           buildCommand: "npm run build",
           outputDirectory: "dist",
           installCommand: "npm install",
+          devCommand: "npm run dev",
         },
+        error: err.message,
       };
     } finally {
       loading.value = false;
@@ -384,8 +398,76 @@ export function useGitHub() {
       Go: "#00ADD8",
       Rust: "#dea584",
       Swift: "#ffac45",
+      Kotlin: "#F18E33",
+      Dart: "#00B4AB",
+      Svelte: "#ff3e00",
+      Astro: "#ff5d01",
     };
     return colors[language] || "#808080";
+  };
+
+  /**
+   * Test de connexion GitHub
+   */
+  const testGitHubConnection = async () => {
+    loading.value = true;
+    error.value = null;
+
+    try {
+      console.log("🧪 Test de connexion GitHub...");
+
+      const response = await api.get("/github/test");
+
+      if (response.data.success) {
+        console.log("✅ Connexion GitHub OK");
+        return {
+          success: true,
+          user: response.data.user,
+          tokenExists: response.data.tokenExists,
+          githubApiTest: response.data.githubApiTest,
+        };
+      } else {
+        throw new Error(response.data.error);
+      }
+    } catch (err) {
+      console.error("❌ Erreur test connexion:", err);
+      error.value = err.response?.data?.error || err.message;
+      return {
+        success: false,
+        error: err.message,
+      };
+    } finally {
+      loading.value = false;
+    }
+  };
+
+  /**
+   * Normaliser les données de repository pour compatibilité
+   */
+  const normalizeRepoData = (rawRepo) => {
+    return {
+      id: rawRepo.id,
+      name: rawRepo.name,
+      fullName: rawRepo.full_name || rawRepo.fullName,
+      description: rawRepo.description,
+      private: rawRepo.private,
+      owner: {
+        login: rawRepo.owner?.login,
+        avatar: rawRepo.owner?.avatar_url || rawRepo.owner?.avatar,
+      },
+      language: rawRepo.language,
+      stargazersCount: rawRepo.stargazers_count || rawRepo.stargazersCount || 0,
+      forksCount: rawRepo.forks_count || rawRepo.forksCount || 0,
+      size: rawRepo.size || 0,
+      defaultBranch: rawRepo.default_branch || rawRepo.defaultBranch || "main",
+      hasPages: rawRepo.has_pages || rawRepo.hasPages || false,
+      createdAt: rawRepo.created_at || rawRepo.createdAt,
+      updatedAt: rawRepo.updated_at || rawRepo.updatedAt,
+      pushedAt: rawRepo.pushed_at || rawRepo.pushedAt,
+      htmlUrl: rawRepo.html_url || rawRepo.htmlUrl,
+      cloneUrl: rawRepo.clone_url || rawRepo.cloneUrl,
+      sshUrl: rawRepo.ssh_url || rawRepo.sshUrl,
+    };
   };
 
   return {
@@ -413,5 +495,7 @@ export function useGitHub() {
     getUniqueLanguages,
     formatRepoSize,
     getLanguageColor,
+    testGitHubConnection,
+    normalizeRepoData,
   };
 }

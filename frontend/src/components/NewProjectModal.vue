@@ -21,6 +21,8 @@ import {
   ChevronRightIcon,
 } from "@heroicons/vue/24/outline";
 import { useGitHub } from "@/composables/useGitHub";
+import { useNotificationsStore } from "@/stores/notifications";
+import axios from "axios";
 
 const emit = defineEmits(["close", "created"]);
 const props = defineProps({
@@ -36,7 +38,10 @@ const {
   detectFramework,
   loading: githubLoading,
   getLanguageColor,
+  normalizeRepoData,
 } = useGitHub();
+
+const notifications = useNotificationsStore();
 
 // État du modal
 const currentStep = ref(1);
@@ -63,6 +68,7 @@ const projectConfig = reactive({
   autoDeployEnabled: true,
   customDomain: "",
   envVars: [],
+  framework: "",
 });
 
 // Computed
@@ -87,7 +93,7 @@ const searchRepositories = () => {
 };
 
 const selectRepository = (repo) => {
-  selectedRepo.value = repo;
+  selectedRepo.value = normalizeRepoData(repo);
   projectConfig.name = repo.name.toLowerCase().replace(/[^a-z0-9-]/g, "-");
 };
 
@@ -110,11 +116,14 @@ const loadRepositoryConfig = async () => {
     availableBranches.value = branches.map((b) => b.name);
 
     // Détecter le framework
+    console.log("🔍 Détection du framework...");
     const detection = await detectFramework(
       selectedRepo.value.owner.login,
       selectedRepo.value.name
     );
+
     detectedFramework.value = detection;
+    console.log("✅ Framework détecté:", detection);
 
     // Appliquer la configuration automatique
     if (detection.buildConfig) {
@@ -122,12 +131,28 @@ const loadRepositoryConfig = async () => {
       projectConfig.outputDirectory =
         detection.buildConfig.outputDirectory || "";
       projectConfig.installCommand = detection.buildConfig.installCommand || "";
+      projectConfig.framework = detection.framework || "";
     }
 
     // Définir la branche par défaut
     projectConfig.branch = selectedRepo.value.defaultBranch || "main";
   } catch (error) {
     console.error("Erreur configuration repo:", error);
+
+    // Configuration par défaut en cas d'erreur
+    projectConfig.buildCommand = "npm run build";
+    projectConfig.outputDirectory = "dist";
+    projectConfig.installCommand = "npm install";
+    projectConfig.framework = "Node.js/JavaScript";
+
+    notifications.warning(
+      "Impossible de détecter le framework automatiquement",
+      {
+        title: "⚠️ Détection framework",
+        message:
+          "Configuration par défaut appliquée. Vous pouvez la modifier manuellement.",
+      }
+    );
   }
 };
 
@@ -143,42 +168,60 @@ const createProject = async () => {
     await new Promise((resolve) => setTimeout(resolve, 800));
 
     creationStatus.value = "Création du projet...";
-    await new Promise((resolve) => setTimeout(resolve, 1200));
 
-    creationStatus.value = "Configuration du webhook GitHub...";
-    await new Promise((resolve) => setTimeout(resolve, 1000));
-
-    creationStatus.value = "Préparation de l'environnement de déploiement...";
-    await new Promise((resolve) => setTimeout(resolve, 800));
-
-    creationStatus.value = "Finalisation...";
-    await new Promise((resolve) => setTimeout(resolve, 500));
-
-    // Créer l'objet projet
-    const project = {
-      id: Date.now(),
+    // Appel API pour créer le projet
+    const projectData = {
       name: projectConfig.name,
-      repository: selectedRepo.value,
+      github_repo: selectedRepo.value.fullName,
       branch: projectConfig.branch,
-      buildCommand: projectConfig.buildCommand,
-      outputDirectory: projectConfig.outputDirectory,
-      installCommand: projectConfig.installCommand,
-      autoDeployEnabled: projectConfig.autoDeployEnabled,
-      customDomain: projectConfig.customDomain || null,
-      envVars: projectConfig.envVars.filter((v) => v.key && v.value),
-      framework: detectedFramework.value?.framework,
-      url: `https://${projectConfig.name}.madahost.dev`,
-      status: "created",
-      createdAt: new Date().toISOString(),
-      deployments: [],
-      lastDeployment: null,
+      build_command: projectConfig.buildCommand,
+      output_dir: projectConfig.outputDirectory,
+      install_command: projectConfig.installCommand,
+      framework: projectConfig.framework,
+      auto_deploy: projectConfig.autoDeployEnabled,
+      env_vars: projectConfig.envVars.filter((v) => v.key && v.value),
     };
 
-    createdProject.value = project;
-    emit("created", project);
+    const api = axios.create({
+      baseURL: import.meta.env.VITE_API_URL || "http://localhost:3001/api",
+      withCredentials: true,
+    });
+
+    const response = await api.post("/projects", projectData);
+
+    if (response.data.success) {
+      creationStatus.value = "Configuration du webhook GitHub...";
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+
+      creationStatus.value = "Finalisation...";
+      await new Promise((resolve) => setTimeout(resolve, 500));
+
+      const project = {
+        ...response.data.project,
+        repository: selectedRepo.value,
+        url: response.data.deploy_url,
+      };
+
+      createdProject.value = project;
+
+      // Notification de succès
+      notifications.projectCreated(project.name, project.url);
+
+      emit("created", project);
+    } else {
+      throw new Error(response.data.error || "Erreur lors de la création");
+    }
   } catch (error) {
     console.error("Erreur création projet:", error);
-    creationError.value = error.message || "Une erreur inattendue est survenue";
+    creationError.value =
+      error.response?.data?.error ||
+      error.message ||
+      "Une erreur inattendue est survenue";
+
+    // Notification d'erreur
+    notifications.error(creationError.value, {
+      title: "❌ Erreur création projet",
+    });
   } finally {
     isCreating.value = false;
     creationStatus.value = "";
@@ -199,18 +242,34 @@ const removeEnvVar = (index) => {
 };
 
 const viewProject = () => {
-  // Rediriger vers la page du projet
   if (createdProject.value) {
     // Ici vous pourriez utiliser le router pour naviguer
     console.log("Redirection vers le projet:", createdProject.value.id);
+    window.open(createdProject.value.url, "_blank");
   }
   close();
 };
 
 const deployNow = () => {
-  // Lancer le déploiement immédiat
   if (createdProject.value) {
     console.log("Démarrage du déploiement pour:", createdProject.value.name);
+
+    // Appeler l'API de déploiement
+    const api = axios.create({
+      baseURL: import.meta.env.VITE_API_URL || "http://localhost:3001/api",
+      withCredentials: true,
+    });
+
+    api
+      .post(`/projects/${createdProject.value.id}/deploy`)
+      .then(() => {
+        notifications.deploymentStarted(createdProject.value.name);
+      })
+      .catch((error) => {
+        notifications.error("Impossible de lancer le déploiement", {
+          details: error.message,
+        });
+      });
   }
   close();
 };
@@ -262,6 +321,7 @@ const reset = () => {
     autoDeployEnabled: true,
     customDomain: "",
     envVars: [],
+    framework: "",
   });
 };
 
@@ -282,17 +342,27 @@ watch(searchQuery, () => {
 // Lifecycle
 const loadInitialData = async () => {
   try {
+    console.log("📥 Chargement des repositories...");
     const repos = await getAllRepos({
       type: "all",
       sort: "updated",
       per_page: 100,
     });
-    allRepos.value = repos;
-    filteredRepos.value = repos;
+
+    // Normaliser les données
+    allRepos.value = repos.map(normalizeRepoData);
+    filteredRepos.value = allRepos.value;
+
+    console.log(`✅ ${allRepos.value.length} repos chargés`);
   } catch (error) {
     console.error("Erreur chargement repos:", error);
     allRepos.value = [];
     filteredRepos.value = [];
+
+    notifications.error("Impossible de charger vos repositories", {
+      title: "❌ Erreur GitHub",
+      message: "Vérifiez votre connexion GitHub et réessayez.",
+    });
   }
 };
 
@@ -595,9 +665,12 @@ onMounted(() => {
                           Framework détecté
                         </h4>
                         <p class="text-sm text-green-700">
-                          {{ detectedFramework.framework }} ({{
-                            Math.round(detectedFramework.confidence * 100)
-                          }}% de confiance)
+                          {{ detectedFramework.framework }}
+                          <span v-if="detectedFramework.confidence">
+                            ({{
+                              Math.round(detectedFramework.confidence * 100)
+                            }}% de confiance)
+                          </span>
                         </p>
                       </div>
                     </div>
@@ -921,7 +994,8 @@ onMounted(() => {
                           <div class="flex justify-between">
                             <span class="text-gray-600">Repository:</span>
                             <span class="font-mono">{{
-                              createdProject.repository.fullName
+                              createdProject.repository?.fullName ||
+                              createdProject.github_repo
                             }}</span>
                           </div>
                           <div class="flex justify-between">
@@ -931,16 +1005,22 @@ onMounted(() => {
                             }}</span>
                           </div>
                           <div class="flex justify-between">
+                            <span class="text-gray-600">Framework:</span>
+                            <span class="text-gray-900">{{
+                              createdProject.framework || "Non spécifié"
+                            }}</span>
+                          </div>
+                          <div class="flex justify-between">
                             <span class="text-gray-600">Auto-deploy:</span>
                             <span
                               :class="
-                                createdProject.autoDeployEnabled
+                                createdProject.auto_deploy
                                   ? 'text-green-600'
                                   : 'text-gray-500'
                               "
                             >
                               {{
-                                createdProject.autoDeployEnabled
+                                createdProject.auto_deploy
                                   ? "Activé"
                                   : "Désactivé"
                               }}
@@ -956,7 +1036,7 @@ onMounted(() => {
                           class="px-6 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 flex items-center"
                         >
                           <EyeIcon class="w-4 h-4 mr-2" />
-                          Voir le projet
+                          Voir le site
                         </button>
                         <button
                           @click="deployNow"
@@ -1075,146 +1155,5 @@ onMounted(() => {
 /* Hover effects pour les cartes de repository */
 .hover\:shadow-md:hover {
   box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
-}
-
-/* Style pour les badges de statut */
-.status-indicator {
-  display: inline-flex;
-  align-items: center;
-  padding: 0.125rem 0.5rem;
-  border-radius: 9999px;
-  font-size: 0.75rem;
-  font-weight: 500;
-}
-
-/* Amélioration de l'accessibilité */
-.sr-only {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  padding: 0;
-  margin: -1px;
-  overflow: hidden;
-  clip: rect(0, 0, 0, 0);
-  white-space: nowrap;
-  border-width: 0;
-}
-
-/* Style pour la barre de progression */
-.progress-bar {
-  transition: width 0.5s ease-in-out;
-}
-
-/* Responsive design amélioré */
-@media (max-width: 768px) {
-  .grid-cols-1.md\:grid-cols-2 {
-    grid-template-columns: 1fr;
-  }
-
-  .grid-cols-1.md\:grid-cols-2.lg\:grid-cols-3 {
-    grid-template-columns: 1fr;
-  }
-
-  .space-x-4 > * + * {
-    margin-left: 0;
-    margin-top: 0.5rem;
-  }
-
-  .flex.space-x-4 {
-    flex-direction: column;
-    align-items: stretch;
-  }
-}
-
-/* Animation d'entrée pour les éléments de liste */
-@keyframes fadeInUp {
-  from {
-    opacity: 0;
-    transform: translateY(20px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-.fade-in-up {
-  animation: fadeInUp 0.3s ease-out forwards;
-}
-
-/* Style pour les tooltips */
-[data-tooltip]:hover::after {
-  content: attr(data-tooltip);
-  position: absolute;
-  bottom: 100%;
-  left: 50%;
-  transform: translateX(-50%);
-  background-color: #1f2937;
-  color: white;
-  padding: 0.5rem;
-  border-radius: 0.375rem;
-  font-size: 0.75rem;
-  white-space: nowrap;
-  z-index: 50;
-  opacity: 1;
-}
-
-[data-tooltip]:hover::before {
-  content: "";
-  position: absolute;
-  bottom: 90%;
-  left: 50%;
-  transform: translateX(-50%);
-  border: 5px solid transparent;
-  border-top-color: #1f2937;
-  z-index: 50;
-}
-
-/* Dark mode support */
-@media (prefers-color-scheme: dark) {
-  .dark\:bg-gray-800 {
-    background-color: #1f2937;
-  }
-
-  .dark\:text-white {
-    color: #ffffff;
-  }
-
-  .dark\:border-gray-600 {
-    border-color: #4b5563;
-  }
-}
-
-/* Print styles */
-@media print {
-  .no-print {
-    display: none !important;
-  }
-}
-
-/* High contrast mode */
-@media (prefers-contrast: high) {
-  .border-gray-200 {
-    border-color: #000000;
-  }
-
-  .text-gray-500 {
-    color: #000000;
-  }
-
-  .bg-gray-50 {
-    background-color: #ffffff;
-  }
-}
-
-/* Reduced motion */
-@media (prefers-reduced-motion: reduce) {
-  .transition-all,
-  .animate-spin,
-  .progress-bar {
-    animation-duration: 0.01ms !important;
-    animation-iteration-count: 1 !important;
-    transition-duration: 0.01ms !important;
-  }
 }
 </style>

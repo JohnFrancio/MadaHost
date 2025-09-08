@@ -204,28 +204,35 @@ export const useProjectsStore = defineStore("projects", {
     },
 
     // Créer un nouveau projet
+    // Créer un nouveau projet
     async createProject(projectData) {
       this.creating = true;
       this.error = null;
 
       try {
+        console.log("Création projet avec données:", projectData);
+
         const response = await api.post("/projects", projectData);
 
         if (response.data.success) {
           // Ajouter le nouveau projet à la liste
           this.projects.unshift(response.data.project);
+          console.log("Projet créé et ajouté à la liste");
 
           return {
             success: true,
             project: response.data.project,
-            message: response.data.message,
+            message: response.data.message || "Projet créé avec succès",
             deploy_url: response.data.deploy_url,
           };
+        } else {
+          throw new Error(response.data.error || "Erreur inconnue");
         }
       } catch (error) {
         console.error("Erreur création projet:", error);
         this.error =
-          error.response?.data?.message ||
+          error.response?.data?.error ||
+          error.message ||
           "Erreur lors de la création du projet";
 
         return {
