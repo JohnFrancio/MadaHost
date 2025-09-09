@@ -696,7 +696,7 @@ onMounted(() => {
                         <p class="mt-1 text-xs text-gray-500">
                           URL: https://{{
                             projectConfig.name || "nom-du-projet"
-                          }}.madahost.dev
+                          }}.madahost.me
                         </p>
                       </div>
 

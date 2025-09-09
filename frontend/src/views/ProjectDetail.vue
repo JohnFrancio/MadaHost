@@ -166,10 +166,31 @@ const deleteProject = async () => {
 };
 
 const viewLogs = (deployment) => {
-  // Afficher les logs dans une alerte pour l'instant
-  alert(
-    "Logs du déploiement:\n\n" +
-      (deployment.build_log || "Aucun log disponible")
+  const logs = deployment.build_log || "Aucun log disponible";
+
+  // Utiliser une notification d'info avec action pour voir les logs complets
+  notificationsStore.info(
+    logs.length > 150 ? logs.substring(0, 150) + "..." : logs,
+    {
+      title: `Logs - Déploiement ${
+        deployment.commit_hash?.substring(0, 7) || "latest"
+      }`,
+      autoClose: false, // L'utilisateur ferme manuellement
+      actions:
+        logs.length > 150
+          ? [
+              {
+                text: "Voir logs complets",
+                primary: true,
+                action: () => {
+                  // Ouvrir une nouvelle fenêtre ou console avec tous les logs
+                  console.log("Logs complets du déploiement:", logs);
+                  // Ou tu peux créer une modal pour afficher tous les logs
+                },
+              },
+            ]
+          : [],
+    }
   );
 };
 

@@ -172,7 +172,7 @@ router.post("/", requireAuth, async (req, res) => {
     const cleanName = name.toLowerCase().replace(/[^a-z0-9]/g, "-");
     const uniqueId = Date.now().toString(36);
     const subdomain = `${cleanName}-${uniqueId}`;
-    const domain = `${subdomain}.madahost.dev`;
+    const domain = `${subdomain}.madahost.me`;
 
     // Définir les commandes par défaut selon le framework
     const getDefaultCommands = (detectedFramework) => {
