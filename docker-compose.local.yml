@@ -28,9 +28,13 @@ services:
       dockerfile: Dockerfile
     ports:
       - "5173:5173"
+    environment:
+      - DOCKER_ENV=true  # Important !
     volumes:
       - ./frontend:/app
       - /app/node_modules
+    depends_on:
+      - nginx
     networks:
       - madahost-local
 
