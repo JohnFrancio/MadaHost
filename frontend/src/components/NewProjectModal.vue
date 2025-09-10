@@ -19,7 +19,7 @@ import {
   PlusIcon,
   EyeIcon,
   ChevronRightIcon,
-} from "@heroicons/vue/24/outline";
+} from "@heroicons/vue/24/solid";
 import { useGitHub } from "@/composables/useGitHub";
 import { useNotificationsStore } from "@/stores/notifications";
 import axios from "axios";
