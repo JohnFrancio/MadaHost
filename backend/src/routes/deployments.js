@@ -315,13 +315,237 @@ router.delete("/:deploymentId", requireAuth, async (req, res) => {
 });
 
 // Fonction pour déployer un projet (processus asynchrone)
-async function deployProject(deploymentId, project) {
-  const deploymentDir = path.join(__dirname, "../../temp", deploymentId);
-  const outputDir = path.join(__dirname, "../../public", project.id);
-  let buildLog = "";
+// async function deployProject(deploymentId, project) {
+//   const deploymentDir = path.join(__dirname, "../../temp", deploymentId);
+//   const outputDir = path.join(__dirname, "../../public", project.id);
+//   let buildLog = "";
 
+//   try {
+//     // Mettre à jour le statut à 'cloning'
+//     buildLog += `🚀 [${new Date().toISOString()}] Démarrage du déploiement...\n`;
+//     await supabase
+//       .from("deployments")
+//       .update({
+//         status: "cloning",
+//         build_log: buildLog,
+//       })
+//       .eq("id", deploymentId);
+
+//     // Créer les dossiers nécessaires
+//     await fs.mkdir(deploymentDir, { recursive: true });
+//     await fs.mkdir(outputDir, { recursive: true });
+
+//     // Étape 1: Cloner le repository
+//     buildLog += `📥 [${new Date().toISOString()}] Clonage de ${
+//       project.github_repo
+//     }...\n`;
+//     await updateDeploymentLog(deploymentId, buildLog);
+
+//     try {
+//       const cloneCommand = `git clone https://github.com/${project.github_repo}.git ${deploymentDir}`;
+//       await execCommand(cloneCommand);
+//       buildLog += `✅ Repository cloné avec succès\n`;
+//     } catch (error) {
+//       throw new Error(`Erreur lors du clonage: ${error.message}`);
+//     }
+
+//     // Changer vers la branche spécifiée
+//     if (
+//       project.branch &&
+//       project.branch !== "main" &&
+//       project.branch !== "master"
+//     ) {
+//       buildLog += `🔄 Basculement vers la branche ${project.branch}...\n`;
+//       await updateDeploymentLog(deploymentId, buildLog);
+
+//       try {
+//         await execCommand(
+//           `cd ${deploymentDir} && git checkout ${project.branch}`
+//         );
+//         buildLog += `✅ Basculement vers ${project.branch} réussi\n`;
+//       } catch (error) {
+//         buildLog += `⚠️ Impossible de basculer vers ${project.branch}, utilisation de la branche par défaut\n`;
+//       }
+//     }
+
+//     // Récupérer le hash du commit
+//     let commitHash = "";
+//     try {
+//       commitHash = await execCommand(
+//         `cd ${deploymentDir} && git rev-parse HEAD`
+//       );
+//       commitHash = commitHash.trim();
+
+//       await supabase
+//         .from("deployments")
+//         .update({ commit_hash: commitHash })
+//         .eq("id", deploymentId);
+
+//       buildLog += `📋 Commit: ${commitHash.substring(0, 8)}\n`;
+//     } catch (error) {
+//       buildLog += `⚠️ Impossible de récupérer le hash du commit\n`;
+//     }
+
+//     // Étape 2: Installation des dépendances
+//     buildLog += `📦 [${new Date().toISOString()}] Installation des dépendances...\n`;
+//     await supabase
+//       .from("deployments")
+//       .update({ status: "building", build_log: buildLog })
+//       .eq("id", deploymentId);
+
+//     const packageJsonPath = path.join(deploymentDir, "package.json");
+//     try {
+//       await fs.access(packageJsonPath);
+
+//       // Détecter le gestionnaire de paquets
+//       const yarnLockExists = await fs
+//         .access(path.join(deploymentDir, "yarn.lock"))
+//         .then(() => true)
+//         .catch(() => false);
+//       const pnpmLockExists = await fs
+//         .access(path.join(deploymentDir, "pnpm-lock.yaml"))
+//         .then(() => true)
+//         .catch(() => false);
+
+//       let installCommand = project.install_command || "npm install";
+//       if (pnpmLockExists && !project.install_command) {
+//         installCommand = "pnpm install";
+//       } else if (yarnLockExists && !project.install_command) {
+//         installCommand = "yarn install";
+//       }
+
+//       buildLog += `🔧 Commande d'installation: ${installCommand}\n`;
+//       await updateDeploymentLog(deploymentId, buildLog);
+
+//       await execCommand(`cd ${deploymentDir} && ${installCommand}`);
+//       buildLog += `✅ Dépendances installées avec succès\n`;
+//     } catch (error) {
+//       buildLog += `⚠️ Pas de package.json trouvé ou erreur d'installation\n`;
+//     }
+
+//     // Étape 3: Build du projet
+//     if (project.build_command) {
+//       buildLog += `🏗️ [${new Date().toISOString()}] Build du projet...\n`;
+//       buildLog += `🔧 Commande: ${project.build_command}\n`;
+//       await updateDeploymentLog(deploymentId, buildLog);
+
+//       try {
+//         await execCommand(`cd ${deploymentDir} && ${project.build_command}`);
+//         buildLog += `✅ Build réussi\n`;
+//       } catch (buildError) {
+//         buildLog += `⚠️ Build échoué: ${buildError.message}\n`;
+//         buildLog += `📁 Déploiement des fichiers source...\n`;
+//       }
+//     }
+
+//     // Étape 4: Déploiement des fichiers
+//     buildLog += `📁 [${new Date().toISOString()}] Déploiement des fichiers...\n`;
+//     await supabase
+//       .from("deployments")
+//       .update({ status: "deploying", build_log: buildLog })
+//       .eq("id", deploymentId);
+
+//     const outputDirectory = project.output_dir || "dist";
+//     const sourceDir = path.join(deploymentDir, outputDirectory);
+
+//     try {
+//       await fs.access(sourceDir);
+//       await execCommand(`cp -r ${sourceDir}/* ${outputDir}/`);
+//       buildLog += `✅ Fichiers copiés depuis ${outputDirectory}\n`;
+//     } catch (error) {
+//       try {
+//         await execCommand(
+//           `find ${deploymentDir} -maxdepth 3 \\( -name "*.html" -o -name "*.css" -o -name "*.js" -o -name "*.png" -o -name "*.jpg" -o -name "*.gif" -o -name "*.svg" \\) -exec cp {} ${outputDir}/ \\;`
+//         );
+//         buildLog += `✅ Fichiers web copiés\n`;
+//       } catch (copyError) {
+//         throw new Error(
+//           `Impossible de copier les fichiers: ${copyError.message}`
+//         );
+//       }
+//     }
+
+//     // Étape 5: Configuration du domaine
+//     buildLog += `🌐 [${new Date().toISOString()}] Configuration du domaine...\n`;
+//     await supabase
+//       .from("deployments")
+//       .update({ status: "configuring", build_log: buildLog })
+//       .eq("id", deploymentId);
+
+//     let domain = project.domain;
+//     if (!domain) {
+//       const slug = project.name.toLowerCase().replace(/[^a-z0-9]/g, "-");
+//       const shortId = project.id.split("-")[0];
+//       domain = `${slug}-${shortId}.localhost:3001`;
+
+//       await supabase
+//         .from("projects")
+//         .update({
+//           domain,
+//           status: "active",
+//           last_deployed: new Date().toISOString(),
+//         })
+//         .eq("id", project.id);
+//     }
+
+//     buildLog += `✅ [${new Date().toISOString()}] Déploiement réussi!\n`;
+//     buildLog += `🌐 Site disponible sur: http://${domain}\n`;
+
+//     // Marquer comme réussi
+//     await supabase
+//       .from("deployments")
+//       .update({
+//         status: "success",
+//         build_log: buildLog,
+//         completed_at: new Date().toISOString(),
+//       })
+//       .eq("id", deploymentId);
+
+//     // Nettoyer après délai
+//     setTimeout(async () => {
+//       try {
+//         await execCommand(`rm -rf ${deploymentDir}`);
+//       } catch (error) {
+//         console.error("❌ Erreur nettoyage:", error);
+//       }
+//     }, 10000);
+//   } catch (error) {
+//     console.error("❌ Erreur déploiement:", error);
+//     buildLog += `❌ [${new Date().toISOString()}] Erreur: ${error.message}\n`;
+
+//     await supabase
+//       .from("deployments")
+//       .update({
+//         status: "failed",
+//         build_log: buildLog,
+//         completed_at: new Date().toISOString(),
+//       })
+//       .eq("id", deploymentId);
+
+//     // Nettoyer même en cas d'erreur
+//     try {
+//       await execCommand(`rm -rf ${deploymentDir}`);
+//     } catch (cleanupError) {
+//       console.error("❌ Erreur nettoyage:", cleanupError);
+//     }
+//   }
+// }
+// backend/src/routes/deployments.js - FONCTION deployProject CORRIGÉE
+
+async function deployProject(deploymentId, project) {
   try {
-    // Mettre à jour le statut à 'cloning'
+    console.log(
+      `🚀 Démarrage déploiement ${deploymentId} pour ${project.name}`
+    );
+
+    // NE PAS utiliser BuildService.deployProject qui crée un autre déploiement
+    // Faire le build directement ici
+
+    const deploymentDir = path.join(__dirname, "../../temp", deploymentId);
+    const outputDir = path.join(__dirname, "../../public", project.id); // Utiliser project.id pas project.name
+    let buildLog = "";
+
+    // Mettre à jour le statut
     buildLog += `🚀 [${new Date().toISOString()}] Démarrage du déploiement...\n`;
     await supabase
       .from("deployments")
@@ -331,63 +555,50 @@ async function deployProject(deploymentId, project) {
       })
       .eq("id", deploymentId);
 
-    // Créer les dossiers nécessaires
+    // Créer les dossiers
     await fs.mkdir(deploymentDir, { recursive: true });
     await fs.mkdir(outputDir, { recursive: true });
 
-    // Étape 1: Cloner le repository
+    // Récupérer le token GitHub
+    const { data: user } = await supabase
+      .from("users")
+      .select("access_token")
+      .eq("id", project.user_id)
+      .single();
+
+    if (!user?.access_token) {
+      throw new Error("Token GitHub manquant pour l'utilisateur");
+    }
+
+    // Cloner avec le token
     buildLog += `📥 [${new Date().toISOString()}] Clonage de ${
       project.github_repo
     }...\n`;
     await updateDeploymentLog(deploymentId, buildLog);
 
+    const cloneCommand = `git clone --depth 1 -b ${
+      project.branch || "main"
+    } https://${user.access_token}@github.com/${
+      project.github_repo
+    }.git ${deploymentDir}`;
+    await execCommand(cloneCommand);
+    buildLog += `✅ Repository cloné avec succès\n`;
+
+    // Récupérer le commit hash
     try {
-      const cloneCommand = `git clone https://github.com/${project.github_repo}.git ${deploymentDir}`;
-      await execCommand(cloneCommand);
-      buildLog += `✅ Repository cloné avec succès\n`;
-    } catch (error) {
-      throw new Error(`Erreur lors du clonage: ${error.message}`);
-    }
-
-    // Changer vers la branche spécifiée
-    if (
-      project.branch &&
-      project.branch !== "main" &&
-      project.branch !== "master"
-    ) {
-      buildLog += `🔄 Basculement vers la branche ${project.branch}...\n`;
-      await updateDeploymentLog(deploymentId, buildLog);
-
-      try {
-        await execCommand(
-          `cd ${deploymentDir} && git checkout ${project.branch}`
-        );
-        buildLog += `✅ Basculement vers ${project.branch} réussi\n`;
-      } catch (error) {
-        buildLog += `⚠️ Impossible de basculer vers ${project.branch}, utilisation de la branche par défaut\n`;
-      }
-    }
-
-    // Récupérer le hash du commit
-    let commitHash = "";
-    try {
-      commitHash = await execCommand(
+      const commitHash = await execCommand(
         `cd ${deploymentDir} && git rev-parse HEAD`
       );
-      commitHash = commitHash.trim();
-
       await supabase
         .from("deployments")
-        .update({ commit_hash: commitHash })
+        .update({ commit_hash: commitHash.trim() })
         .eq("id", deploymentId);
-
-      buildLog += `📋 Commit: ${commitHash.substring(0, 8)}\n`;
+      buildLog += `📋 Commit: ${commitHash.trim().substring(0, 8)}\n`;
     } catch (error) {
-      buildLog += `⚠️ Impossible de récupérer le hash du commit\n`;
+      buildLog += `⚠️ Impossible de récupérer le commit hash\n`;
     }
 
-    // Étape 2: Installation des dépendances
-    buildLog += `📦 [${new Date().toISOString()}] Installation des dépendances...\n`;
+    // Installation des dépendances
     await supabase
       .from("deployments")
       .update({ status: "building", build_log: buildLog })
@@ -397,33 +608,19 @@ async function deployProject(deploymentId, project) {
     try {
       await fs.access(packageJsonPath);
 
-      // Détecter le gestionnaire de paquets
-      const yarnLockExists = await fs
-        .access(path.join(deploymentDir, "yarn.lock"))
-        .then(() => true)
-        .catch(() => false);
-      const pnpmLockExists = await fs
-        .access(path.join(deploymentDir, "pnpm-lock.yaml"))
-        .then(() => true)
-        .catch(() => false);
-
-      let installCommand = project.install_command || "npm install";
-      if (pnpmLockExists && !project.install_command) {
-        installCommand = "pnpm install";
-      } else if (yarnLockExists && !project.install_command) {
-        installCommand = "yarn install";
-      }
-
-      buildLog += `🔧 Commande d'installation: ${installCommand}\n`;
+      buildLog += `📦 [${new Date().toISOString()}] Installation des dépendances...\n`;
       await updateDeploymentLog(deploymentId, buildLog);
 
-      await execCommand(`cd ${deploymentDir} && ${installCommand}`);
-      buildLog += `✅ Dépendances installées avec succès\n`;
+      const installCmd = project.install_command || "npm install";
+      buildLog += `🔧 Commande: ${installCmd}\n`;
+
+      await execCommand(`cd ${deploymentDir} && ${installCmd}`);
+      buildLog += `✅ Dépendances installées\n`;
     } catch (error) {
-      buildLog += `⚠️ Pas de package.json trouvé ou erreur d'installation\n`;
+      buildLog += `⚠️ Pas de package.json ou erreur installation\n`;
     }
 
-    // Étape 3: Build du projet
+    // Build du projet
     if (project.build_command) {
       buildLog += `🏗️ [${new Date().toISOString()}] Build du projet...\n`;
       buildLog += `🔧 Commande: ${project.build_command}\n`;
@@ -433,17 +630,18 @@ async function deployProject(deploymentId, project) {
         await execCommand(`cd ${deploymentDir} && ${project.build_command}`);
         buildLog += `✅ Build réussi\n`;
       } catch (buildError) {
-        buildLog += `⚠️ Build échoué: ${buildError.message}\n`;
-        buildLog += `📁 Déploiement des fichiers source...\n`;
+        buildLog += `⚠️ Build échoué, copie des fichiers source\n`;
       }
     }
 
-    // Étape 4: Déploiement des fichiers
-    buildLog += `📁 [${new Date().toISOString()}] Déploiement des fichiers...\n`;
+    // Copie des fichiers
     await supabase
       .from("deployments")
       .update({ status: "deploying", build_log: buildLog })
       .eq("id", deploymentId);
+
+    buildLog += `📁 [${new Date().toISOString()}] Copie des fichiers...\n`;
+    await updateDeploymentLog(deploymentId, buildLog);
 
     const outputDirectory = project.output_dir || "dist";
     const sourceDir = path.join(deploymentDir, outputDirectory);
@@ -453,45 +651,40 @@ async function deployProject(deploymentId, project) {
       await execCommand(`cp -r ${sourceDir}/* ${outputDir}/`);
       buildLog += `✅ Fichiers copiés depuis ${outputDirectory}\n`;
     } catch (error) {
+      // Copier les fichiers HTML/CSS/JS
       try {
         await execCommand(
-          `find ${deploymentDir} -maxdepth 3 \\( -name "*.html" -o -name "*.css" -o -name "*.js" -o -name "*.png" -o -name "*.jpg" -o -name "*.gif" -o -name "*.svg" \\) -exec cp {} ${outputDir}/ \\;`
+          `find ${deploymentDir} -maxdepth 2 \\( -name "*.html" -o -name "*.css" -o -name "*.js" -o -name "*.png" -o -name "*.jpg" -o -name "*.gif" -o -name "*.svg" \\) -exec cp {} ${outputDir}/ \\; 2>/dev/null || true`
         );
-        buildLog += `✅ Fichiers web copiés\n`;
+        buildLog += `✅ Fichiers statiques copiés\n`;
       } catch (copyError) {
-        throw new Error(
-          `Impossible de copier les fichiers: ${copyError.message}`
-        );
+        buildLog += `⚠️ Erreur copie fichiers: ${copyError.message}\n`;
       }
     }
 
-    // Étape 5: Configuration du domaine
-    buildLog += `🌐 [${new Date().toISOString()}] Configuration du domaine...\n`;
+    // Configuration domaine
     await supabase
       .from("deployments")
       .update({ status: "configuring", build_log: buildLog })
       .eq("id", deploymentId);
 
-    let domain = project.domain;
-    if (!domain) {
-      const slug = project.name.toLowerCase().replace(/[^a-z0-9]/g, "-");
-      const shortId = project.id.split("-")[0];
-      domain = `${slug}-${shortId}.localhost:3001`;
+    const domain = `${project.name
+      .toLowerCase()
+      .replace(/[^a-z0-9]/g, "-")}.madahost.me`;
 
-      await supabase
-        .from("projects")
-        .update({
-          domain,
-          status: "active",
-          last_deployed: new Date().toISOString(),
-        })
-        .eq("id", project.id);
-    }
+    await supabase
+      .from("projects")
+      .update({
+        domain,
+        status: "active",
+        last_deployed: new Date().toISOString(),
+      })
+      .eq("id", project.id);
 
     buildLog += `✅ [${new Date().toISOString()}] Déploiement réussi!\n`;
-    buildLog += `🌐 Site disponible sur: http://${domain}\n`;
+    buildLog += `🌐 Site disponible: http://localhost:3002/project/${project.id}/\n`;
 
-    // Marquer comme réussi
+    // Succès final
     await supabase
       .from("deployments")
       .update({
@@ -501,30 +694,34 @@ async function deployProject(deploymentId, project) {
       })
       .eq("id", deploymentId);
 
-    // Nettoyer après délai
+    // Nettoyer après 10 secondes
     setTimeout(async () => {
       try {
         await execCommand(`rm -rf ${deploymentDir}`);
+        console.log(`🧹 Nettoyage terminé: ${deploymentDir}`);
       } catch (error) {
         console.error("❌ Erreur nettoyage:", error);
       }
     }, 10000);
   } catch (error) {
-    console.error("❌ Erreur déploiement:", error);
-    buildLog += `❌ [${new Date().toISOString()}] Erreur: ${error.message}\n`;
+    console.error(`❌ Erreur déploiement ${deploymentId}:`, error);
 
     await supabase
       .from("deployments")
       .update({
         status: "failed",
-        build_log: buildLog,
+        build_log: `❌ [${new Date().toISOString()}] Erreur: ${
+          error.message
+        }\n`,
         completed_at: new Date().toISOString(),
       })
       .eq("id", deploymentId);
 
-    // Nettoyer même en cas d'erreur
+    // Nettoyer en cas d'erreur
     try {
-      await execCommand(`rm -rf ${deploymentDir}`);
+      await execCommand(
+        `rm -rf ${path.join(__dirname, "../../temp", deploymentId)}`
+      );
     } catch (cleanupError) {
       console.error("❌ Erreur nettoyage:", cleanupError);
     }

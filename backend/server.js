@@ -6,6 +6,8 @@ const morgan = require("morgan");
 const session = require("express-session");
 const passport = require("passport");
 require("dotenv").config();
+const StaticServer = require("./src/services/staticServer");
+const staticServer = new StaticServer();
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -89,7 +91,7 @@ const githubRoutes = require("./src/routes/github");
 app.use("/api/github", githubRoutes);
 
 // Routes des déploiements
-const deploymentsRoutes = require("./src/routes/deployments");
+const deploymentsRoutes = require("./src/routes/deployments.js");
 app.use("/api/deployments", deploymentsRoutes);
 
 // Route de santé détaillée
@@ -242,13 +244,25 @@ app.use("*", (req, res) => {
 });
 
 // Démarrage du serveur avec vérifications
-app.listen(PORT, () => {
+app.listen(PORT, async () => {
   console.log("🚀 Serveur MadaHost démarré !");
   console.log(`🔗 API disponible sur: http://localhost:${PORT}`);
   console.log(
     `🌐 Frontend sur: ${process.env.FRONTEND_URL || "http://localhost:5173"}`
   );
   console.log(`🏗️ Environnement: ${process.env.NODE_ENV || "development"}`);
+
+  // Démarrer le serveur statique
+  try {
+    await staticServer.start();
+    console.log(
+      `📡 Serveur statique sur: http://localhost:${
+        process.env.STATIC_PORT || 3002
+      }`
+    );
+  } catch (error) {
+    console.error("❌ Erreur démarrage serveur statique:", error);
+  }
 
   // Vérifications de configuration
   const missingConfig = [];
@@ -277,7 +291,16 @@ app.listen(PORT, () => {
   console.log("  - GET  /api/github/test");
   console.log("  - GET  /api/projects");
   console.log("");
-
+  console.log("📡 Serveur statique:");
+  console.log(
+    `  - GET  http://localhost:${
+      process.env.STATIC_PORT || 3002
+    }/project/:projectId/*`
+  );
+  console.log(
+    `  - GET  http://projet.localhost:${process.env.STATIC_PORT || 3002}/`
+  );
+  console.log("");
   console.log("✅ Serveur prêt à recevoir les requêtes");
 
   // Test de connectivité Supabase
@@ -304,13 +327,22 @@ app.listen(PORT, () => {
   }
 });
 
+// Arrêt propre des deux serveurs
+const gracefulShutdown = () => {
+  console.log("\n🛑 Arrêt des serveurs...");
+  staticServer.stop();
+  process.exit(0);
+};
+
 // Gestion propre de l'arrêt du serveur
 process.on("SIGINT", () => {
+  gracefulShutdown;
   console.log("\n🛑 Arrêt du serveur demandé");
   process.exit(0);
 });
 
 process.on("SIGTERM", () => {
+  gracefulShutdown;
   console.log("\n🛑 Arrêt du serveur (SIGTERM)");
   process.exit(0);
 });
