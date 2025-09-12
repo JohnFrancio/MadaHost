@@ -1,27 +1,19 @@
-// backend/src/routes/deployments.js - VERSION CORRIGÉE
+// backend/src/routes/deployments.js - CORRIGÉ FINAL
 const express = require("express");
 const router = express.Router();
 const supabase = require("../config/supabase");
-const jwt = require("jsonwebtoken");
 const { exec } = require("child_process");
 const fs = require("fs").promises;
 const path = require("path");
-
-// Middleware d'authentification
-const requireAuth = (req, res, next) => {
-  if (!req.user) {
-    return res.status(401).json({ error: "Authentification requise" });
-  }
-  next();
-};
+const { requireAuth } = require("../middleware/auth");
 
 // Route pour récupérer les déploiements d'un projet
 router.get("/projects/:projectId", requireAuth, async (req, res) => {
   try {
-    const { page = 1, limit = 10 } = req.query;
-    const offset = (page - 1) * limit;
+    console.log(`📋 Récupération déploiements projet ${req.params.projectId}`);
 
-    // CORRECTION : Supprimer .offset() qui n'existe pas
+    const { page = 1, limit = 20 } = req.query;
+
     const { data: deployments, error } = await supabase
       .from("deployments")
       .select("*")
@@ -30,35 +22,78 @@ router.get("/projects/:projectId", requireAuth, async (req, res) => {
       .limit(parseInt(limit));
 
     if (error) {
-      console.error("Erreur lors de la récupération des déploiements:", error);
+      console.error("❌ Erreur récupération déploiements:", error);
       return res.status(500).json({
+        success: false,
         error: "Erreur lors de la récupération des déploiements",
         details: error.message,
       });
     }
 
-    res.json(deployments || []);
+    res.json({
+      success: true,
+      deployments: deployments || [],
+    });
   } catch (error) {
-    console.error("Erreur:", error);
-    res.status(500).json({ error: "Erreur serveur" });
+    console.error("❌ Erreur:", error);
+    res.status(500).json({
+      success: false,
+      error: "Erreur serveur",
+    });
   }
 });
 
-// AJOUT : Route pour les statistiques des déploiements
+// Route pour récupérer UN déploiement spécifique (manquant dans ton backend)
+router.get("/:deploymentId", requireAuth, async (req, res) => {
+  try {
+    console.log(`🔍 Récupération déploiement ${req.params.deploymentId}`);
+
+    const { data: deployment, error } = await supabase
+      .from("deployments")
+      .select("*, projects!inner(user_id, name)")
+      .eq("id", req.params.deploymentId)
+      .eq("projects.user_id", req.user.id)
+      .single();
+
+    if (error || !deployment) {
+      return res.status(404).json({
+        success: false,
+        error: "Déploiement non trouvé",
+      });
+    }
+
+    res.json({
+      success: true,
+      deployment,
+    });
+  } catch (error) {
+    console.error("❌ Erreur récupération déploiement:", error);
+    res.status(500).json({
+      success: false,
+      error: "Erreur serveur",
+    });
+  }
+});
+
+// Route pour les statistiques des déploiements
 router.get("/stats", requireAuth, async (req, res) => {
   try {
-    // Récupérer les statistiques globales pour l'utilisateur
+    console.log(`📊 Récupération stats pour ${req.user.username}`);
+
     const { data: projects } = await supabase
       .from("projects")
       .select("id")
-      .eq("user_id", req.user.userId);
+      .eq("user_id", req.user.id);
 
     if (!projects || projects.length === 0) {
       return res.json({
-        totalDeployments: 0,
-        successfulDeployments: 0,
-        failedDeployments: 0,
-        successRate: 0,
+        success: true,
+        stats: {
+          totalDeployments: 0,
+          successfulDeployments: 0,
+          failedDeployments: 0,
+          successRate: 0,
+        },
       });
     }
 
@@ -90,14 +125,20 @@ router.get("/stats", requireAuth, async (req, res) => {
         : 0;
 
     res.json({
-      totalDeployments: totalDeployments || 0,
-      successfulDeployments: successfulDeployments || 0,
-      failedDeployments: failedDeployments || 0,
-      successRate,
+      success: true,
+      stats: {
+        totalDeployments: totalDeployments || 0,
+        successfulDeployments: successfulDeployments || 0,
+        failedDeployments: failedDeployments || 0,
+        successRate,
+      },
     });
   } catch (error) {
-    console.error("Erreur lors de la récupération des statistiques:", error);
-    res.status(500).json({ error: "Erreur serveur" });
+    console.error("❌ Erreur récupération statistiques:", error);
+    res.status(500).json({
+      success: false,
+      error: "Erreur serveur",
+    });
   }
 });
 
@@ -105,19 +146,23 @@ router.get("/stats", requireAuth, async (req, res) => {
 router.post("/deploy/:projectId", requireAuth, async (req, res) => {
   const projectId = req.params.projectId;
   console.log(
-    `🚀 Lancement du déploiement pour le projet ${projectId} by ${req.user.userId}`
+    `🚀 Lancement déploiement projet ${projectId} par ${req.user.username}`
   );
+
   try {
     // Vérifier que le projet appartient à l'utilisateur
     const { data: project, error: projectError } = await supabase
       .from("projects")
       .select("*")
       .eq("id", projectId)
-      // .eq("user_id", req.user.userId)
+      .eq("user_id", req.user.id)
       .single();
 
     if (projectError || !project) {
-      return res.status(404).json({ error: "Projet non trouvé" });
+      return res.status(404).json({
+        success: false,
+        error: "Projet non trouvé",
+      });
     }
 
     // Vérifier qu'il n'y a pas déjà un déploiement en cours
@@ -125,11 +170,18 @@ router.post("/deploy/:projectId", requireAuth, async (req, res) => {
       .from("deployments")
       .select("id")
       .eq("project_id", projectId)
-      .in("status", ["pending", "building"])
+      .in("status", [
+        "pending",
+        "building",
+        "cloning",
+        "deploying",
+        "configuring",
+      ])
       .limit(1);
 
     if (pendingDeployment && pendingDeployment.length > 0) {
       return res.status(409).json({
+        success: false,
         error: "Un déploiement est déjà en cours pour ce projet",
       });
     }
@@ -148,11 +200,9 @@ router.post("/deploy/:projectId", requireAuth, async (req, res) => {
       .single();
 
     if (deploymentError) {
-      console.error(
-        "Erreur lors de la création du déploiement:",
-        deploymentError
-      );
+      console.error("❌ Erreur création déploiement:", deploymentError);
       return res.status(500).json({
+        success: false,
         error: "Impossible de créer le déploiement",
         details: deploymentError.message,
       });
@@ -162,14 +212,105 @@ router.post("/deploy/:projectId", requireAuth, async (req, res) => {
     deployProject(deployment.id, project);
 
     res.json({
-      id: deployment.id,
-      status: "pending",
+      success: true,
+      deployment: {
+        id: deployment.id,
+        status: "pending",
+        projectId: projectId,
+      },
       message: "Déploiement lancé",
-      projectId: projectId,
     });
   } catch (error) {
-    console.error("Erreur lors du lancement du déploiement:", error);
-    res.status(500).json({ error: "Erreur lors du lancement du déploiement" });
+    console.error("❌ Erreur lancement déploiement:", error);
+    res.status(500).json({
+      success: false,
+      error: "Erreur lors du lancement du déploiement",
+    });
+  }
+});
+
+// Route pour récupérer les logs d'un déploiement
+router.get("/:deploymentId/logs", requireAuth, async (req, res) => {
+  try {
+    const { data: deployment, error } = await supabase
+      .from("deployments")
+      .select("build_log, deploy_log, status, projects!inner(user_id)")
+      .eq("id", req.params.deploymentId)
+      .eq("projects.user_id", req.user.id)
+      .single();
+
+    if (error || !deployment) {
+      return res.status(404).json({
+        success: false,
+        error: "Déploiement non trouvé",
+      });
+    }
+
+    res.json({
+      success: true,
+      logs: {
+        build: deployment.build_log || "",
+        deploy: deployment.deploy_log || "",
+      },
+      status: deployment.status,
+    });
+  } catch (error) {
+    console.error("❌ Erreur récupération logs:", error);
+    res.status(500).json({
+      success: false,
+      error: "Erreur serveur",
+    });
+  }
+});
+
+// Route pour annuler un déploiement (DELETE au lieu de POST)
+router.delete("/:deploymentId", requireAuth, async (req, res) => {
+  try {
+    console.log(`❌ Annulation déploiement ${req.params.deploymentId}`);
+
+    const { data: deployment, error } = await supabase
+      .from("deployments")
+      .select("*, projects!inner(user_id)")
+      .eq("id", req.params.deploymentId)
+      .eq("projects.user_id", req.user.id)
+      .single();
+
+    if (error || !deployment) {
+      return res.status(404).json({
+        success: false,
+        error: "Déploiement non trouvé",
+      });
+    }
+
+    if (deployment.status === "success" || deployment.status === "failed") {
+      return res.status(400).json({
+        success: false,
+        error: "Déploiement déjà terminé",
+      });
+    }
+
+    // Marquer comme annulé
+    await supabase
+      .from("deployments")
+      .update({
+        status: "cancelled",
+        completed_at: new Date().toISOString(),
+        build_log:
+          (deployment.build_log || "") +
+          "\n❌ Déploiement annulé par l'utilisateur",
+      })
+      .eq("id", req.params.deploymentId);
+
+    res.json({
+      success: true,
+      message: "Déploiement annulé",
+    });
+  } catch (error) {
+    console.error("❌ Erreur annulation:", error);
+    res.status(500).json({
+      success: false,
+      error: "Erreur serveur",
+    });
   }
 });
 
@@ -180,12 +321,12 @@ async function deployProject(deploymentId, project) {
   let buildLog = "";
 
   try {
-    // Mettre à jour le statut à 'building'
+    // Mettre à jour le statut à 'cloning'
     buildLog += `🚀 [${new Date().toISOString()}] Démarrage du déploiement...\n`;
     await supabase
       .from("deployments")
       .update({
-        status: "building",
+        status: "cloning",
         build_log: buildLog,
       })
       .eq("id", deploymentId);
@@ -223,7 +364,7 @@ async function deployProject(deploymentId, project) {
         );
         buildLog += `✅ Basculement vers ${project.branch} réussi\n`;
       } catch (error) {
-        buildLog += `⚠️  Impossible de basculer vers ${project.branch}, utilisation de la branche par défaut\n`;
+        buildLog += `⚠️ Impossible de basculer vers ${project.branch}, utilisation de la branche par défaut\n`;
       }
     }
 
@@ -235,7 +376,6 @@ async function deployProject(deploymentId, project) {
       );
       commitHash = commitHash.trim();
 
-      // Mettre à jour avec le commit hash
       await supabase
         .from("deployments")
         .update({ commit_hash: commitHash })
@@ -243,12 +383,15 @@ async function deployProject(deploymentId, project) {
 
       buildLog += `📋 Commit: ${commitHash.substring(0, 8)}\n`;
     } catch (error) {
-      buildLog += `⚠️  Impossible de récupérer le hash du commit\n`;
+      buildLog += `⚠️ Impossible de récupérer le hash du commit\n`;
     }
 
-    // Étape 2: Installer les dépendances
+    // Étape 2: Installation des dépendances
     buildLog += `📦 [${new Date().toISOString()}] Installation des dépendances...\n`;
-    await updateDeploymentLog(deploymentId, buildLog);
+    await supabase
+      .from("deployments")
+      .update({ status: "building", build_log: buildLog })
+      .eq("id", deploymentId);
 
     const packageJsonPath = path.join(deploymentDir, "package.json");
     try {
@@ -277,12 +420,12 @@ async function deployProject(deploymentId, project) {
       await execCommand(`cd ${deploymentDir} && ${installCommand}`);
       buildLog += `✅ Dépendances installées avec succès\n`;
     } catch (error) {
-      buildLog += `⚠️  Pas de package.json trouvé ou erreur d'installation\n`;
+      buildLog += `⚠️ Pas de package.json trouvé ou erreur d'installation\n`;
     }
 
     // Étape 3: Build du projet
     if (project.build_command) {
-      buildLog += `🏗️  [${new Date().toISOString()}] Build du projet...\n`;
+      buildLog += `🏗️ [${new Date().toISOString()}] Build du projet...\n`;
       buildLog += `🔧 Commande: ${project.build_command}\n`;
       await updateDeploymentLog(deploymentId, buildLog);
 
@@ -290,14 +433,17 @@ async function deployProject(deploymentId, project) {
         await execCommand(`cd ${deploymentDir} && ${project.build_command}`);
         buildLog += `✅ Build réussi\n`;
       } catch (buildError) {
-        buildLog += `⚠️  Build échoué: ${buildError.message}\n`;
+        buildLog += `⚠️ Build échoué: ${buildError.message}\n`;
         buildLog += `📁 Déploiement des fichiers source...\n`;
       }
     }
 
-    // Étape 4: Copier les fichiers
-    buildLog += `📁 [${new Date().toISOString()}] Copie des fichiers...\n`;
-    await updateDeploymentLog(deploymentId, buildLog);
+    // Étape 4: Déploiement des fichiers
+    buildLog += `📁 [${new Date().toISOString()}] Déploiement des fichiers...\n`;
+    await supabase
+      .from("deployments")
+      .update({ status: "deploying", build_log: buildLog })
+      .eq("id", deploymentId);
 
     const outputDirectory = project.output_dir || "dist";
     const sourceDir = path.join(deploymentDir, outputDirectory);
@@ -307,7 +453,6 @@ async function deployProject(deploymentId, project) {
       await execCommand(`cp -r ${sourceDir}/* ${outputDir}/`);
       buildLog += `✅ Fichiers copiés depuis ${outputDirectory}\n`;
     } catch (error) {
-      // Si le dossier de sortie n'existe pas, copier les fichiers web
       try {
         await execCommand(
           `find ${deploymentDir} -maxdepth 3 \\( -name "*.html" -o -name "*.css" -o -name "*.js" -o -name "*.png" -o -name "*.jpg" -o -name "*.gif" -o -name "*.svg" \\) -exec cp {} ${outputDir}/ \\;`
@@ -320,7 +465,13 @@ async function deployProject(deploymentId, project) {
       }
     }
 
-    // Générer le domaine si nécessaire
+    // Étape 5: Configuration du domaine
+    buildLog += `🌐 [${new Date().toISOString()}] Configuration du domaine...\n`;
+    await supabase
+      .from("deployments")
+      .update({ status: "configuring", build_log: buildLog })
+      .eq("id", deploymentId);
+
     let domain = project.domain;
     if (!domain) {
       const slug = project.name.toLowerCase().replace(/[^a-z0-9]/g, "-");
@@ -350,16 +501,16 @@ async function deployProject(deploymentId, project) {
       })
       .eq("id", deploymentId);
 
-    // Nettoyer
+    // Nettoyer après délai
     setTimeout(async () => {
       try {
         await execCommand(`rm -rf ${deploymentDir}`);
       } catch (error) {
-        console.error("Erreur nettoyage:", error);
+        console.error("❌ Erreur nettoyage:", error);
       }
-    }, 5000);
+    }, 10000);
   } catch (error) {
-    console.error("Erreur déploiement:", error);
+    console.error("❌ Erreur déploiement:", error);
     buildLog += `❌ [${new Date().toISOString()}] Erreur: ${error.message}\n`;
 
     await supabase
@@ -375,7 +526,7 @@ async function deployProject(deploymentId, project) {
     try {
       await execCommand(`rm -rf ${deploymentDir}`);
     } catch (cleanupError) {
-      console.error("Erreur nettoyage:", cleanupError);
+      console.error("❌ Erreur nettoyage:", cleanupError);
     }
   }
 }
@@ -388,7 +539,7 @@ async function updateDeploymentLog(deploymentId, buildLog) {
       .update({ build_log: buildLog })
       .eq("id", deploymentId);
   } catch (error) {
-    console.error("Erreur mise à jour logs:", error);
+    console.error("❌ Erreur mise à jour logs:", error);
   }
 }
 
@@ -405,66 +556,5 @@ function execCommand(command, timeout = 300000) {
     });
   });
 }
-
-// Route pour récupérer les logs d'un déploiement
-router.get("/:deploymentId/logs", requireAuth, async (req, res) => {
-  try {
-    const { data: deployment, error } = await supabase
-      .from("deployments")
-      .select("build_log, deploy_log, status")
-      .eq("id", req.params.deploymentId)
-      .single();
-
-    if (error || !deployment) {
-      return res.status(404).json({ error: "Déploiement non trouvé" });
-    }
-
-    res.json({
-      buildLog: deployment.build_log || "",
-      deployLog: deployment.deploy_log || "",
-      status: deployment.status,
-    });
-  } catch (error) {
-    console.error("Erreur récupération logs:", error);
-    res.status(500).json({ error: "Erreur serveur" });
-  }
-});
-
-// Route pour annuler un déploiement
-router.post("/:deploymentId/cancel", requireAuth, async (req, res) => {
-  try {
-    const { data: deployment, error } = await supabase
-      .from("deployments")
-      .select("*, projects!inner(user_id)")
-      .eq("id", req.params.deploymentId)
-      .eq("projects.user_id", req.user.userId)
-      .single();
-
-    if (error || !deployment) {
-      return res.status(404).json({ error: "Déploiement non trouvé" });
-    }
-
-    if (deployment.status === "success" || deployment.status === "failed") {
-      return res.status(400).json({ error: "Déploiement déjà terminé" });
-    }
-
-    // Marquer comme annulé
-    await supabase
-      .from("deployments")
-      .update({
-        status: "cancelled",
-        completed_at: new Date().toISOString(),
-        build_log:
-          (deployment.build_log || "") +
-          "\n❌ Déploiement annulé par l'utilisateur",
-      })
-      .eq("id", req.params.deploymentId);
-
-    res.json({ message: "Déploiement annulé" });
-  } catch (error) {
-    console.error("Erreur annulation:", error);
-    res.status(500).json({ error: "Erreur serveur" });
-  }
-});
 
 module.exports = router;
