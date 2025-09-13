@@ -244,8 +244,7 @@ const removeEnvVar = (index) => {
 const viewProject = () => {
   if (createdProject.value) {
     // Ici vous pourriez utiliser le router pour naviguer
-    console.log("Redirection vers le projet:", createdProject.value.id);
-    window.open(createdProject.value.url, "_blank");
+    $router.push(`/project/${createdProject.value.id}`);
   }
   close();
 };

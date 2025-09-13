@@ -1,4 +1,4 @@
-// backend/src/services/staticServer.js
+// backend/src/services/staticServer.js - VERSION AMÉLIORÉE
 const express = require("express");
 const path = require("path");
 const fs = require("fs").promises;
@@ -22,6 +22,32 @@ class StaticServer {
       next();
     });
 
+    // Middleware pour définir les bons MIME types
+    this.app.use((req, res, next) => {
+      const ext = path.extname(req.path);
+      const mimeTypes = {
+        ".html": "text/html",
+        ".js": "application/javascript",
+        ".css": "text/css",
+        ".json": "application/json",
+        ".png": "image/png",
+        ".jpg": "image/jpeg",
+        ".jpeg": "image/jpeg",
+        ".gif": "image/gif",
+        ".svg": "image/svg+xml",
+        ".ico": "image/x-icon",
+        ".woff": "font/woff",
+        ".woff2": "font/woff2",
+        ".ttf": "font/ttf",
+        ".otf": "font/otf",
+      };
+
+      if (mimeTypes[ext]) {
+        res.type(mimeTypes[ext]);
+      }
+      next();
+    });
+
     // Logging des requêtes
     this.app.use((req, res, next) => {
       console.log(`📡 [${new Date().toISOString()}] ${req.method} ${req.url}`);
@@ -40,12 +66,18 @@ class StaticServer {
       });
     });
 
-    // Route pour servir les projets par ID
+    // Route pour servir les projets par ID avec support des sous-dossiers
     this.app.get("/project/:projectId/*", async (req, res) => {
       const { projectId } = req.params;
       const filePath = req.params[0] || "index.html";
 
       await this.serveProjectFile(projectId, filePath, res);
+    });
+
+    // Route pour servir les projets par ID sans sous-chemin
+    this.app.get("/project/:projectId", async (req, res) => {
+      const { projectId } = req.params;
+      await this.serveProjectFile(projectId, "index.html", res);
     });
 
     // Route pour servir les projets par sous-domaine
@@ -76,40 +108,192 @@ class StaticServer {
     });
   }
 
+  //   async serveProjectFile(projectId, filePath, res) {
+  //     try {
+  //       const projectDir = path.join(this.publicDir, projectId);
+  //       const fullPath = path.join(projectDir, filePath);
+
+  //       // Vérifier que le fichier est dans le dossier du projet (sécurité)
+  //       if (!fullPath.startsWith(projectDir)) {
+  //         console.log(`🔒 Tentative d'accès refusée: ${fullPath}`);
+  //         return res.status(403).json({ error: "Accès refusé" });
+  //       }
+
+  //       console.log(`📂 Tentative d'accès au fichier: ${fullPath}`);
+
+  //       // Tenter de servir le fichier
+  //       try {
+  //         const stats = await fs.stat(fullPath);
+
+  //         if (stats.isFile()) {
+  //           console.log(`✅ Fichier trouvé et servi: ${filePath}`);
+
+  //           // Définir les headers de cache pour les assets
+  //           const ext = path.extname(filePath);
+  //           if (
+  //             [
+  //               ".js",
+  //               ".css",
+  //               ".png",
+  //               ".jpg",
+  //               ".jpeg",
+  //               ".gif",
+  //               ".svg",
+  //               ".woff",
+  //               ".woff2",
+  //             ].includes(ext)
+  //           ) {
+  //             res.set("Cache-Control", "public, max-age=31536000"); // 1 an
+  //           }
+
+  //           return res.sendFile(fullPath);
+  //         }
+  //       } catch (fileError) {
+  //         console.log(`❌ Fichier non trouvé: ${fullPath}`);
+  //       }
+
+  //       // Fallback pour les SPA - servir index.html
+  //       const indexPath = path.join(projectDir, "index.html");
+  //       try {
+  //         await fs.access(indexPath);
+  //         console.log(`🔄 Fallback vers index.html pour: ${filePath}`);
+  //         return res.sendFile(indexPath);
+  //       } catch (indexErr) {
+  //         console.log(`❌ index.html non trouvé dans: ${projectDir}`);
+
+  //         // Debug: lister les fichiers du projet
+  //         try {
+  //           const files = await fs.readdir(projectDir);
+  //           console.log(`📋 Fichiers disponibles dans ${projectId}:`, files);
+  //         } catch (listError) {
+  //           console.log(`❌ Impossible de lister les fichiers de ${projectId}`);
+  //         }
+
+  //         return this.serveProjectNotFoundPage(res, projectId);
+  //       }
+  //     } catch (error) {
+  //       console.error(
+  //         `❌ Erreur serveur statique pour ${projectId}/${filePath}:`,
+  //         error
+  //       );
+  //       res.status(500).json({
+  //         error: "Erreur interne",
+  //         message: "Impossible de servir le fichier",
+  //         projectId,
+  //         filePath,
+  //       });
+  //     }
+  //   }
+
   async serveProjectFile(projectId, filePath, res) {
     try {
       const projectDir = path.join(this.publicDir, projectId);
-      const fullPath = path.join(projectDir, filePath);
+      let fullPath = path.join(projectDir, filePath);
 
       // Vérifier que le fichier est dans le dossier du projet (sécurité)
       if (!fullPath.startsWith(projectDir)) {
+        console.log(`🔒 Tentative d'accès refusée: ${fullPath}`);
         return res.status(403).json({ error: "Accès refusé" });
       }
 
-      // Tenter de servir le fichier
+      console.log(`📂 Tentative d'accès au fichier: ${fullPath}`);
+
+      // Tenter de servir le fichier directement
       try {
         const stats = await fs.stat(fullPath);
 
         if (stats.isFile()) {
+          console.log(`✅ Fichier trouvé et servi: ${filePath}`);
+
+          // Définir les headers de cache pour les assets
+          const ext = path.extname(filePath);
+          if (
+            [
+              ".js",
+              ".css",
+              ".png",
+              ".jpg",
+              ".jpeg",
+              ".gif",
+              ".svg",
+              ".woff",
+              ".woff2",
+            ].includes(ext)
+          ) {
+            res.set("Cache-Control", "public, max-age=31536000"); // 1 an
+          }
+
           return res.sendFile(fullPath);
         }
-      } catch (err) {
-        // Fichier non trouvé
-      }
+      } catch (fileError) {
+        console.log(`❌ Fichier non trouvé: ${fullPath}`);
 
-      // Fallback pour les SPA - servir index.html
-      const indexPath = path.join(projectDir, "index.html");
-      try {
-        await fs.access(indexPath);
-        return res.sendFile(indexPath);
-      } catch (indexErr) {
-        return this.serveProjectNotFoundPage(res, projectId);
+        // Si le fichier n'est pas trouvé, essayer dans le dossier assets/
+        if (!filePath.startsWith("assets/")) {
+          const assetsPath = path.join(projectDir, "assets", filePath);
+          console.log(`🔍 Tentative dans assets/: ${assetsPath}`);
+
+          try {
+            const assetsStats = await fs.stat(assetsPath);
+            if (assetsStats.isFile()) {
+              console.log(`✅ Fichier trouvé dans assets/: ${filePath}`);
+
+              const ext = path.extname(filePath);
+              if (
+                [
+                  ".js",
+                  ".css",
+                  ".png",
+                  ".jpg",
+                  ".jpeg",
+                  ".gif",
+                  ".svg",
+                  ".woff",
+                  ".woff2",
+                ].includes(ext)
+              ) {
+                res.set("Cache-Control", "public, max-age=31536000");
+              }
+
+              return res.sendFile(assetsPath);
+            }
+          } catch (assetsError) {
+            console.log(
+              `❌ Fichier non trouvé dans assets/ non plus: ${assetsPath}`
+            );
+          }
+        }
+
+        // Debug: Lister les fichiers disponibles
+        try {
+          const projectFiles = await fs.readdir(projectDir);
+          console.log(
+            `📋 Fichiers disponibles dans ${projectId}:`,
+            projectFiles.slice(0, 10)
+          );
+
+          // Vérifier spécifiquement le dossier assets
+          const assetsDir = path.join(projectDir, "assets");
+          try {
+            const assetsFiles = await fs.readdir(assetsDir);
+            console.log(`📁 Fichiers dans assets/:`, assetsFiles.slice(0, 10));
+          } catch (assetsDirError) {
+            console.log(`❌ Dossier assets/ non trouvé dans ${projectId}`);
+          }
+        } catch (listError) {
+          console.log(`❌ Impossible de lister les fichiers de ${projectId}`);
+        }
       }
     } catch (error) {
-      console.error(`❌ Erreur serveur statique:`, error);
+      console.error(
+        `❌ Erreur serveur statique pour ${projectId}/${filePath}:`,
+        error
+      );
       res.status(500).json({
         error: "Erreur interne",
         message: "Impossible de servir le fichier",
+        projectId,
+        filePath,
       });
     }
   }
@@ -192,7 +376,7 @@ class StaticServer {
         <div class="container">
           <h1>🚀 Site non trouvé</h1>
           <p>Le sous-domaine <span class="subdomain">${subdomain}</span> ne correspond à aucun projet déployé.</p>
-          <p>Vérifiez l'URL ou <a href="https://madahost.me/dashboard">créez un nouveau projet</a>.</p>
+          <p>Vérifiez l'URL ou <a href="http://localhost:5173/dashboard">créez un nouveau projet</a>.</p>
           <hr style="margin: 2rem 0; border: 1px solid rgba(255,255,255,0.3);">
           <p style="font-size: 0.9rem; opacity: 0.7;">Powered by MadaHost</p>
         </div>
@@ -232,7 +416,7 @@ class StaticServer {
           }
           h1 { margin: 0 0 1rem; font-size: 2.5rem; }
           p { margin: 0 0 1rem; opacity: 0.9; }
-          .project-id { font-family: monospace; background: rgba(255,255,255,0.2); padding: 0.5rem; border-radius: 0.5rem; }
+          .project-id { font-family: monospace; background: rgba(255,255,255,0.2); padding: 0.5rem; border-radius: 0.5rem; word-break: break-all; }
         </style>
       </head>
       <body>
@@ -240,6 +424,7 @@ class StaticServer {
           <h1>🏗️ Site en construction</h1>
           <p>Le projet <span class="project-id">${projectId}</span> n'a pas encore été déployé ou ne contient pas de fichiers.</p>
           <p>Le déploiement peut prendre quelques minutes après la création du projet.</p>
+          <p><a href="http://localhost:5173/project/${projectId}" style="color: #fff;">Retour au dashboard</a></p>
           <hr style="margin: 2rem 0; border: 1px solid rgba(255,255,255,0.3);">
           <p style="font-size: 0.9rem; opacity: 0.7;">Powered by MadaHost</p>
         </div>
@@ -258,7 +443,7 @@ class StaticServer {
         );
         console.log(`📡 Health check: http://localhost:${this.port}/health`);
         console.log(
-          `🔗 Projets accessibles via sous-domaines ou /project/:id/`
+          `🔗 Projets accessibles via /project/:id/ ou sous-domaines`
         );
         resolve(this.server);
       });

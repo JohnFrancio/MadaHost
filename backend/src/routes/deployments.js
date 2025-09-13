@@ -532,17 +532,227 @@ router.delete("/:deploymentId", requireAuth, async (req, res) => {
 // }
 // backend/src/routes/deployments.js - FONCTION deployProject CORRIGÉE
 
+// azo lazaina mety
+// async function deployProject(deploymentId, project) {
+//   try {
+//     console.log(
+//       `🚀 Démarrage déploiement ${deploymentId} pour ${project.name}`
+//     );
+
+//     // NE PAS utiliser BuildService.deployProject qui crée un autre déploiement
+//     // Faire le build directement ici
+
+//     const deploymentDir = path.join(__dirname, "../../temp", deploymentId);
+//     const outputDir = path.join(__dirname, "../../public", project.id); // Utiliser project.id pas project.name
+//     let buildLog = "";
+
+//     // Mettre à jour le statut
+//     buildLog += `🚀 [${new Date().toISOString()}] Démarrage du déploiement...\n`;
+//     await supabase
+//       .from("deployments")
+//       .update({
+//         status: "cloning",
+//         build_log: buildLog,
+//       })
+//       .eq("id", deploymentId);
+
+//     // Créer les dossiers
+//     await fs.mkdir(deploymentDir, { recursive: true });
+//     await fs.mkdir(outputDir, { recursive: true });
+
+//     // Récupérer le token GitHub
+//     const { data: user } = await supabase
+//       .from("users")
+//       .select("access_token")
+//       .eq("id", project.user_id)
+//       .single();
+
+//     if (!user?.access_token) {
+//       throw new Error("Token GitHub manquant pour l'utilisateur");
+//     }
+
+//     // Cloner avec le token
+//     buildLog += `📥 [${new Date().toISOString()}] Clonage de ${
+//       project.github_repo
+//     }...\n`;
+//     await updateDeploymentLog(deploymentId, buildLog);
+
+//     const cloneCommand = `git clone --depth 1 -b ${
+//       project.branch || "main"
+//     } https://${user.access_token}@github.com/${
+//       project.github_repo
+//     }.git ${deploymentDir}`;
+//     await execCommand(cloneCommand);
+//     buildLog += `✅ Repository cloné avec succès\n`;
+
+//     // Récupérer le commit hash
+//     try {
+//       const commitHash = await execCommand(
+//         `cd ${deploymentDir} && git rev-parse HEAD`
+//       );
+//       await supabase
+//         .from("deployments")
+//         .update({ commit_hash: commitHash.trim() })
+//         .eq("id", deploymentId);
+//       buildLog += `📋 Commit: ${commitHash.trim().substring(0, 8)}\n`;
+//     } catch (error) {
+//       buildLog += `⚠️ Impossible de récupérer le commit hash\n`;
+//     }
+
+//     // Installation des dépendances
+//     await supabase
+//       .from("deployments")
+//       .update({ status: "building", build_log: buildLog })
+//       .eq("id", deploymentId);
+
+//     const packageJsonPath = path.join(deploymentDir, "package.json");
+//     try {
+//       await fs.access(packageJsonPath);
+
+//       buildLog += `📦 [${new Date().toISOString()}] Installation des dépendances...\n`;
+//       await updateDeploymentLog(deploymentId, buildLog);
+
+//       const installCmd = project.install_command || "npm install";
+//       buildLog += `🔧 Commande: ${installCmd}\n`;
+
+//       await execCommand(`cd ${deploymentDir} && ${installCmd}`);
+//       buildLog += `✅ Dépendances installées\n`;
+//     } catch (error) {
+//       buildLog += `⚠️ Pas de package.json ou erreur installation\n`;
+//     }
+
+//     // Build du projet
+//     if (project.build_command) {
+//       buildLog += `🏗️ [${new Date().toISOString()}] Build du projet...\n`;
+//       buildLog += `🔧 Commande: ${project.build_command}\n`;
+//       await updateDeploymentLog(deploymentId, buildLog);
+
+//       try {
+//         await execCommand(`cd ${deploymentDir} && ${project.build_command}`);
+//         buildLog += `✅ Build réussi\n`;
+//       } catch (buildError) {
+//         buildLog += `⚠️ Build échoué, copie des fichiers source\n`;
+//       }
+//     }
+
+//     // Copie des fichiers
+//     await supabase
+//       .from("deployments")
+//       .update({ status: "deploying", build_log: buildLog })
+//       .eq("id", deploymentId);
+
+//     buildLog += `📁 [${new Date().toISOString()}] Copie des fichiers...\n`;
+//     await updateDeploymentLog(deploymentId, buildLog);
+
+//     const outputDirectory = project.output_dir || "dist";
+//     const sourceDir = path.join(deploymentDir, outputDirectory);
+
+//     try {
+//       await fs.access(sourceDir);
+//       await execCommand(`cp -r ${sourceDir}/* ${outputDir}/`);
+//       buildLog += `✅ Fichiers copiés depuis ${outputDirectory}\n`;
+//     } catch (error) {
+//       // Copier les fichiers HTML/CSS/JS
+//       try {
+//         await execCommand(
+//           `find ${deploymentDir} -maxdepth 2 \\( -name "*.html" -o -name "*.css" -o -name "*.js" -o -name "*.png" -o -name "*.jpg" -o -name "*.gif" -o -name "*.svg" \\) -exec cp {} ${outputDir}/ \\; 2>/dev/null || true`
+//         );
+//         await execCommand(
+//           `rsync -av --include="*/" --include="*.html" --include="*.css" --include="*.js" --include="*.jsx" --include="*.tsx" --include="*.png" --include="*.jpg" --include="*.svg" --include="*.ico" --include="*.gif" --include="*.woff*" --include="*.ttf" --exclude="*" "${deploymentDir}/" "${outputDir}/"`
+//         );
+//         buildLog += `✅ Fichiers statiques copiés\n`;
+//       } catch (copyError) {
+//         await execCommand(
+//           `find ${deploymentDir} -maxdepth 2 \\( -name "*.html" -o -name "*.css" -o -name "*.js" -o -name "*.png" -o -name "*.jpg" -o -name "*.gif" -o -name "*.svg" \\) -exec cp {} ${outputDir}/ \\; 2>/dev/null || true`
+//         );
+//         buildLog += `⚠️ Erreur copie fichiers: ${copyError.message}\n`;
+//       }
+//     }
+
+//     // Lister les fichiers copiés pour debug
+//     try {
+//       const fileList = await execCommand(`ls -la "${outputDir}"`);
+//       buildLog += `📋 Contenu du dossier de déploiement:\n${fileList}`;
+//     } catch (listError) {
+//       buildLog += `⚠️ Impossible de lister les fichiers copiés\n`;
+//     }
+
+//     // Configuration domaine
+//     await supabase
+//       .from("deployments")
+//       .update({ status: "configuring", build_log: buildLog })
+//       .eq("id", deploymentId);
+
+//     const domain = `${project.name
+//       .toLowerCase()
+//       .replace(/[^a-z0-9]/g, "-")}.madahost.me`;
+
+//     await supabase
+//       .from("projects")
+//       .update({
+//         domain,
+//         status: "active",
+//         last_deployed: new Date().toISOString(),
+//       })
+//       .eq("id", project.id);
+
+//     buildLog += `✅ [${new Date().toISOString()}] Déploiement réussi!\n`;
+//     buildLog += `🌐 Site disponible: http://localhost:3002/project/${project.id}/\n`;
+
+//     // Succès final
+//     await supabase
+//       .from("deployments")
+//       .update({
+//         status: "success",
+//         build_log: buildLog,
+//         completed_at: new Date().toISOString(),
+//       })
+//       .eq("id", deploymentId);
+
+//     // Nettoyer après 10 secondes
+//     setTimeout(async () => {
+//       try {
+//         await execCommand(`rm -rf ${deploymentDir}`);
+//         console.log(`🧹 Nettoyage terminé: ${deploymentDir}`);
+//       } catch (error) {
+//         console.error("❌ Erreur nettoyage:", error);
+//       }
+//     }, 10000);
+//   } catch (error) {
+//     console.error(`❌ Erreur déploiement ${deploymentId}:`, error);
+
+//     await supabase
+//       .from("deployments")
+//       .update({
+//         status: "failed",
+//         build_log: `❌ [${new Date().toISOString()}] Erreur: ${
+//           error.message
+//         }\n`,
+//         completed_at: new Date().toISOString(),
+//       })
+//       .eq("id", deploymentId);
+
+//     // Nettoyer en cas d'erreur
+//     try {
+//       await execCommand(
+//         `rm -rf ${path.join(__dirname, "../../temp", deploymentId)}`
+//       );
+//     } catch (cleanupError) {
+//       console.error("❌ Erreur nettoyage:", cleanupError);
+//     }
+//   }
+// }
+
+// backend/src/routes/deployments.js - Fonction deployProject CORRIGÉE pour copier tous les assets
+
 async function deployProject(deploymentId, project) {
   try {
     console.log(
       `🚀 Démarrage déploiement ${deploymentId} pour ${project.name}`
     );
 
-    // NE PAS utiliser BuildService.deployProject qui crée un autre déploiement
-    // Faire le build directement ici
-
     const deploymentDir = path.join(__dirname, "../../temp", deploymentId);
-    const outputDir = path.join(__dirname, "../../public", project.id); // Utiliser project.id pas project.name
+    const outputDir = path.join(__dirname, "../../public", project.id);
     let buildLog = "";
 
     // Mettre à jour le statut
@@ -634,7 +844,7 @@ async function deployProject(deploymentId, project) {
       }
     }
 
-    // Copie des fichiers
+    // Copie des fichiers - CORRECTION ICI
     await supabase
       .from("deployments")
       .update({ status: "deploying", build_log: buildLog })
@@ -646,20 +856,67 @@ async function deployProject(deploymentId, project) {
     const outputDirectory = project.output_dir || "dist";
     const sourceDir = path.join(deploymentDir, outputDirectory);
 
+    // Debug: vérifier l'existence du dossier
+    buildLog += `🔍 Vérification dossier source: ${sourceDir}\n`;
+
     try {
+      // Lister le contenu du dossier de déploiement pour debug
+      const tempContent = await execCommand(`ls -la "${deploymentDir}"`);
+      buildLog += `📋 Contenu dossier temp:\n${tempContent}`;
+
+      // Vérifier si le dossier de build existe
       await fs.access(sourceDir);
-      await execCommand(`cp -r ${sourceDir}/* ${outputDir}/`);
-      buildLog += `✅ Fichiers copiés depuis ${outputDirectory}\n`;
-    } catch (error) {
-      // Copier les fichiers HTML/CSS/JS
+      buildLog += `✅ Dossier ${outputDirectory} trouvé\n`;
+
+      // Lister le contenu du dossier dist pour debug
+      const distContent = await execCommand(`ls -la "${sourceDir}"`);
+      buildLog += `📁 Contenu du dossier ${outputDirectory}:\n${distContent}`;
+
+      // CORRECTION: Nettoyer et recréer le dossier de destination
+      await execCommand(`rm -rf "${outputDir}"/*`);
+      await execCommand(`mkdir -p "${outputDir}"`);
+
+      // Copier TOUT le contenu en préservant la structure
+      await execCommand(`cp -r "${sourceDir}/"* "${outputDir}/"`);
+      buildLog += `✅ Tous les fichiers copiés depuis ${outputDirectory} avec structure préservée\n`;
+
+      // Vérifier la structure finale copiée
+      const finalStructure = await execCommand(`find "${outputDir}" -type f`);
+      buildLog += `📊 Structure finale:\n${finalStructure}`;
+
+      // Vérifier spécifiquement le dossier assets
       try {
-        await execCommand(
-          `find ${deploymentDir} -maxdepth 2 \\( -name "*.html" -o -name "*.css" -o -name "*.js" -o -name "*.png" -o -name "*.jpg" -o -name "*.gif" -o -name "*.svg" \\) -exec cp {} ${outputDir}/ \\; 2>/dev/null || true`
+        const assetsContent = await execCommand(
+          `ls -la "${outputDir}/assets/"`
         );
-        buildLog += `✅ Fichiers statiques copiés\n`;
-      } catch (copyError) {
-        buildLog += `⚠️ Erreur copie fichiers: ${copyError.message}\n`;
+        buildLog += `📁 Contenu du dossier assets:\n${assetsContent}`;
+      } catch (assetsError) {
+        buildLog += `⚠️ Pas de dossier assets dans la destination finale\n`;
       }
+    } catch (error) {
+      buildLog += `⚠️ Dossier ${outputDirectory} introuvable, tentative copie alternative...\n`;
+
+      try {
+        // Alternative: Copier récursivement tous les fichiers statiques
+        await execCommand(
+          `rsync -av --include="*/" --include="*.html" --include="*.css" --include="*.js" --include="*.png" --include="*.jpg" --include="*.svg" --include="*.ico" --include="*.gif" --include="*.woff*" --include="*.ttf" --exclude="*" "${deploymentDir}/" "${outputDir}/"`
+        );
+        buildLog += `✅ Fichiers statiques copiés avec rsync\n`;
+      } catch (rsyncError) {
+        // Dernière tentative: copie basique
+        await execCommand(
+          `find "${deploymentDir}" -maxdepth 3 \\( -name "*.html" -o -name "*.css" -o -name "*.js" -o -name "*.png" -o -name "*.jpg" -o -name "*.gif" -o -name "*.svg" -o -name "*.ico" -o -name "*.woff*" -o -name "*.ttf" \\) -exec cp {} "${outputDir}/" \\; 2>/dev/null || true`
+        );
+        buildLog += `✅ Fichiers statiques copiés (méthode basique)\n`;
+      }
+    }
+
+    // Lister les fichiers copiés pour debug
+    try {
+      const fileList = await execCommand(`ls -la "${outputDir}"`);
+      buildLog += `📋 Contenu du dossier de déploiement:\n${fileList}`;
+    } catch (listError) {
+      buildLog += `⚠️ Impossible de lister les fichiers copiés\n`;
     }
 
     // Configuration domaine
