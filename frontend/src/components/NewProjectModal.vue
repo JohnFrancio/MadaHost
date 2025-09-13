@@ -63,7 +63,7 @@ const projectConfig = reactive({
   name: "",
   branch: "main",
   buildCommand: "",
-  outputDirectory: "",
+  outputDirectory: "dist",
   installCommand: "",
   autoDeployEnabled: true,
   customDomain: "",
@@ -129,7 +129,7 @@ const loadRepositoryConfig = async () => {
     if (detection.buildConfig) {
       projectConfig.buildCommand = detection.buildConfig.buildCommand || "";
       projectConfig.outputDirectory =
-        detection.buildConfig.outputDirectory || "";
+        detection.buildConfig.outputDirectory || "dist";
       projectConfig.installCommand = detection.buildConfig.installCommand || "";
       projectConfig.framework = detection.framework || "";
     }

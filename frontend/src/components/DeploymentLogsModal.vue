@@ -26,7 +26,7 @@
             leave-to="opacity-0 scale-95"
           >
             <DialogPanel
-              class="w-full max-w-6xl max-h-[90vh] transform overflow-hidden rounded-xl bg-white shadow-xl transition-all flex flex-col"
+              class="w-full max-w-6xl max-h-[90vh] transform overflow-y-auto rounded-xl bg-white shadow-xl transition-all flex flex-col"
             >
               <!-- Header -->
               <div
@@ -204,13 +204,13 @@
                 </div>
 
                 <!-- Container des logs -->
-                <div class="flex-1 overflow-hidden">
+                <div class="flex-1 h-full overflow-auto">
                   <!-- Tab: Build Logs -->
                   <div
                     v-if="activeTab === 'build'"
                     class="h-full flex flex-col"
                   >
-                    <div class="flex-1 overflow-hidden">
+                    <div class="flex-1 h-full overflow-auto">
                       <div
                         ref="buildLogsContainer"
                         class="h-full overflow-y-auto bg-gray-900 text-green-400 font-mono text-sm p-4 logs-container"
