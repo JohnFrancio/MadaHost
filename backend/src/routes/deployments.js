@@ -831,16 +831,63 @@ async function deployProject(deploymentId, project) {
     }
 
     // Build du projet
+    // if (project.build_command) {
+    //   buildLog += `🏗️ [${new Date().toISOString()}] Build du projet...\n`;
+    //   buildLog += `🔧 Commande: ${project.build_command}\n`;
+    //   await updateDeploymentLog(deploymentId, buildLog);
+
+    //   try {
+    //     await execCommand(`cd ${deploymentDir} && ${project.build_command}`);
+    //     buildLog += `✅ Build réussi\n`;
+    //   } catch (buildError) {
+    //     buildLog += `⚠️ Build échoué, copie des fichiers source\n`;
+    //   }
+    // }
     if (project.build_command) {
       buildLog += `🏗️ [${new Date().toISOString()}] Build du projet...\n`;
       buildLog += `🔧 Commande: ${project.build_command}\n`;
       await updateDeploymentLog(deploymentId, buildLog);
 
       try {
+        // Pour Vite, assurer que les assets ont les bons chemins relatifs
+        const viteConfigPath = path.join(deploymentDir, "vite.config.js");
+        const packageJsonPath = path.join(deploymentDir, "package.json");
+
+        // Vérifier si c'est un projet Vite
+        let isViteProject = false;
+        try {
+          const packageJson = JSON.parse(
+            await fs.readFile(packageJsonPath, "utf8")
+          );
+          isViteProject =
+            packageJson.devDependencies?.vite || packageJson.dependencies?.vite;
+          buildLog += `🔍 Projet Vite détecté: ${!!isViteProject}\n`;
+        } catch (e) {
+          buildLog += `⚠️ Impossible de lire package.json\n`;
+        }
+
+        // Si c'est Vite, créer/modifier la config pour les chemins relatifs
+        if (isViteProject) {
+          const viteConfig = `import { defineConfig } from 'vite'
+            import react from '@vitejs/plugin-react'
+
+            export default defineConfig({
+              plugins: [react()],
+              base: './',  // CRUCIAL: chemins relatifs pour les assets
+              build: {
+                outDir: 'dist',
+                assetsDir: 'assets'
+              }
+            })`;
+          await fs.writeFile(viteConfigPath, viteConfig);
+          buildLog += `⚙️ Configuration Vite mise à jour pour chemins relatifs\n`;
+        }
+
         await execCommand(`cd ${deploymentDir} && ${project.build_command}`);
         buildLog += `✅ Build réussi\n`;
       } catch (buildError) {
-        buildLog += `⚠️ Build échoué, copie des fichiers source\n`;
+        buildLog += `⚠️ Build échoué: ${buildError.message}\n`;
+        buildLog += `📁 Tentative de déploiement des fichiers source...\n`;
       }
     }
 
@@ -910,7 +957,55 @@ async function deployProject(deploymentId, project) {
         buildLog += `✅ Fichiers statiques copiés (méthode basique)\n`;
       }
     }
+    const indexPath = path.join(outputDir, "index.html");
+    try {
+      let indexContent = await fs.readFile(indexPath, "utf8");
 
+      buildLog += `🔧 [${new Date().toISOString()}] Correction des chemins dans index.html...\n`;
+
+      // Remplacer les chemins absolus par des chemins relatifs
+      indexContent = indexContent
+        .replace(/href="\/assets\//g, 'href="./assets/')
+        .replace(/src="\/assets\//g, 'src="./assets/')
+        .replace(/href="\//g, 'href="./')
+        .replace(/src="\//g, 'src="./');
+
+      await fs.writeFile(indexPath, indexContent);
+      buildLog += `✅ Chemins corrigés dans index.html\n`;
+
+      // Vérifier que les fichiers CSS/JS référencés existent
+      const cssMatches =
+        indexContent.match(/href="\.\/assets\/[^"]+\.css"/g) || [];
+      const jsMatches =
+        indexContent.match(/src="\.\/assets\/[^"]+\.js"/g) || [];
+
+      buildLog += `🎨 Fichiers CSS référencés: ${cssMatches.length}\n`;
+      buildLog += `📜 Fichiers JS référencés: ${jsMatches.length}\n`;
+
+      // Vérifier l'existence des fichiers CSS
+      for (const cssMatch of cssMatches) {
+        const cssFile = cssMatch.match(/href="(.+)"/)[1].replace("./", "");
+        const cssPath = path.join(outputDir, cssFile);
+        try {
+          await fs.access(cssPath);
+          buildLog += `✅ CSS trouvé: ${cssFile}\n`;
+        } catch (e) {
+          buildLog += `❌ CSS manquant: ${cssFile}\n`;
+        }
+      }
+    } catch (indexFixError) {
+      buildLog += `⚠️ Impossible de corriger index.html: ${indexFixError.message}\n`;
+    }
+
+    // Lister la structure finale pour debug
+    try {
+      const structure = await execCommand(
+        `find "${outputDir}" -type f | head -20`
+      );
+      buildLog += `📊 Structure finale (20 premiers fichiers):\n${structure}`;
+    } catch (listError) {
+      buildLog += `⚠️ Impossible de lister la structure finale\n`;
+    }
     // Lister les fichiers copiés pour debug
     try {
       const fileList = await execCommand(`ls -la "${outputDir}"`);

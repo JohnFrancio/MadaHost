@@ -185,10 +185,125 @@ class StaticServer {
   //     }
   //   }
 
+  // 15 Sept
+  // async serveProjectFile(projectId, filePath, res) {
+  //   try {
+  //     const projectDir = path.join(this.publicDir, projectId);
+  //     let fullPath = path.join(projectDir, filePath);
+
+  //     // Vérifier que le fichier est dans le dossier du projet (sécurité)
+  //     if (!fullPath.startsWith(projectDir)) {
+  //       console.log(`🔒 Tentative d'accès refusée: ${fullPath}`);
+  //       return res.status(403).json({ error: "Accès refusé" });
+  //     }
+
+  //     console.log(`📂 Tentative d'accès au fichier: ${fullPath}`);
+
+  //     // Tenter de servir le fichier directement
+  //     try {
+  //       const stats = await fs.stat(fullPath);
+
+  //       if (stats.isFile()) {
+  //         console.log(`✅ Fichier trouvé et servi: ${filePath}`);
+
+  //         // Définir les headers de cache pour les assets
+  //         const ext = path.extname(filePath);
+  //         if (
+  //           [
+  //             ".js",
+  //             ".css",
+  //             ".png",
+  //             ".jpg",
+  //             ".jpeg",
+  //             ".gif",
+  //             ".svg",
+  //             ".woff",
+  //             ".woff2",
+  //           ].includes(ext)
+  //         ) {
+  //           res.set("Cache-Control", "public, max-age=31536000"); // 1 an
+  //         }
+
+  //         return res.sendFile(fullPath);
+  //       }
+  //     } catch (fileError) {
+  //       console.log(`❌ Fichier non trouvé: ${fullPath}`);
+
+  //       // Si le fichier n'est pas trouvé, essayer dans le dossier assets/
+  //       if (!filePath.startsWith("assets/")) {
+  //         const assetsPath = path.join(projectDir, "assets", filePath);
+  //         console.log(`🔍 Tentative dans assets/: ${assetsPath}`);
+
+  //         try {
+  //           const assetsStats = await fs.stat(assetsPath);
+  //           if (assetsStats.isFile()) {
+  //             console.log(`✅ Fichier trouvé dans assets/: ${filePath}`);
+
+  //             const ext = path.extname(filePath);
+  //             if (
+  //               [
+  //                 ".js",
+  //                 ".css",
+  //                 ".png",
+  //                 ".jpg",
+  //                 ".jpeg",
+  //                 ".gif",
+  //                 ".svg",
+  //                 ".woff",
+  //                 ".woff2",
+  //               ].includes(ext)
+  //             ) {
+  //               res.set("Cache-Control", "public, max-age=31536000");
+  //             }
+
+  //             return res.sendFile(assetsPath);
+  //           }
+  //         } catch (assetsError) {
+  //           console.log(
+  //             `❌ Fichier non trouvé dans assets/ non plus: ${assetsPath}`
+  //           );
+  //         }
+  //       }
+
+  //       // Debug: Lister les fichiers disponibles
+  //       try {
+  //         const projectFiles = await fs.readdir(projectDir);
+  //         console.log(
+  //           `📋 Fichiers disponibles dans ${projectId}:`,
+  //           projectFiles.slice(0, 10)
+  //         );
+
+  //         // Vérifier spécifiquement le dossier assets
+  //         const assetsDir = path.join(projectDir, "assets");
+  //         try {
+  //           const assetsFiles = await fs.readdir(assetsDir);
+  //           console.log(`📁 Fichiers dans assets/:`, assetsFiles.slice(0, 10));
+  //         } catch (assetsDirError) {
+  //           console.log(`❌ Dossier assets/ non trouvé dans ${projectId}`);
+  //         }
+  //       } catch (listError) {
+  //         console.log(`❌ Impossible de lister les fichiers de ${projectId}`);
+  //       }
+  //     }
+  //   } catch (error) {
+  //     console.error(
+  //       `❌ Erreur serveur statique pour ${projectId}/${filePath}:`,
+  //       error
+  //     );
+  //     res.status(500).json({
+  //       error: "Erreur interne",
+  //       message: "Impossible de servir le fichier",
+  //       projectId,
+  //       filePath,
+  //     });
+  //   }
+  // }
   async serveProjectFile(projectId, filePath, res) {
     try {
       const projectDir = path.join(this.publicDir, projectId);
       let fullPath = path.join(projectDir, filePath);
+
+      console.log(`📂 Servir: ${projectId}/${filePath}`);
 
       // Vérifier que le fichier est dans le dossier du projet (sécurité)
       if (!fullPath.startsWith(projectDir)) {
@@ -196,104 +311,168 @@ class StaticServer {
         return res.status(403).json({ error: "Accès refusé" });
       }
 
-      console.log(`📂 Tentative d'accès au fichier: ${fullPath}`);
+      // Fonction pour essayer plusieurs emplacements de fichiers
+      const tryLocations = [
+        fullPath, // Emplacement direct
+        path.join(projectDir, "assets", filePath), // Dans assets/
+        path.join(projectDir, "dist", filePath), // Dans dist/
+        path.join(projectDir, "dist", "assets", filePath), // Dans dist/assets/
+      ];
 
-      // Tenter de servir le fichier directement
-      try {
-        const stats = await fs.stat(fullPath);
-
-        if (stats.isFile()) {
-          console.log(`✅ Fichier trouvé et servi: ${filePath}`);
-
-          // Définir les headers de cache pour les assets
-          const ext = path.extname(filePath);
-          if (
-            [
-              ".js",
-              ".css",
-              ".png",
-              ".jpg",
-              ".jpeg",
-              ".gif",
-              ".svg",
-              ".woff",
-              ".woff2",
-            ].includes(ext)
-          ) {
-            res.set("Cache-Control", "public, max-age=31536000"); // 1 an
-          }
-
-          return res.sendFile(fullPath);
-        }
-      } catch (fileError) {
-        console.log(`❌ Fichier non trouvé: ${fullPath}`);
-
-        // Si le fichier n'est pas trouvé, essayer dans le dossier assets/
-        if (!filePath.startsWith("assets/")) {
-          const assetsPath = path.join(projectDir, "assets", filePath);
-          console.log(`🔍 Tentative dans assets/: ${assetsPath}`);
-
-          try {
-            const assetsStats = await fs.stat(assetsPath);
-            if (assetsStats.isFile()) {
-              console.log(`✅ Fichier trouvé dans assets/: ${filePath}`);
-
-              const ext = path.extname(filePath);
-              if (
-                [
-                  ".js",
-                  ".css",
-                  ".png",
-                  ".jpg",
-                  ".jpeg",
-                  ".gif",
-                  ".svg",
-                  ".woff",
-                  ".woff2",
-                ].includes(ext)
-              ) {
-                res.set("Cache-Control", "public, max-age=31536000");
-              }
-
-              return res.sendFile(assetsPath);
-            }
-          } catch (assetsError) {
-            console.log(
-              `❌ Fichier non trouvé dans assets/ non plus: ${assetsPath}`
-            );
-          }
-        }
-
-        // Debug: Lister les fichiers disponibles
+      // Essayer chaque emplacement
+      for (const location of tryLocations) {
         try {
-          const projectFiles = await fs.readdir(projectDir);
-          console.log(
-            `📋 Fichiers disponibles dans ${projectId}:`,
-            projectFiles.slice(0, 10)
-          );
+          const stats = await fs.stat(location);
+          if (stats.isFile()) {
+            console.log(
+              `✅ Fichier trouvé: ${location.replace(this.publicDir, "")}`
+            );
 
-          // Vérifier spécifiquement le dossier assets
-          const assetsDir = path.join(projectDir, "assets");
-          try {
-            const assetsFiles = await fs.readdir(assetsDir);
-            console.log(`📁 Fichiers dans assets/:`, assetsFiles.slice(0, 10));
-          } catch (assetsDirError) {
-            console.log(`❌ Dossier assets/ non trouvé dans ${projectId}`);
+            // Headers corrects selon le type de fichier
+            const ext = path.extname(location).toLowerCase();
+
+            // Headers de sécurité et cache
+            res.set("X-Content-Type-Options", "nosniff");
+            res.set("X-Frame-Options", "SAMEORIGIN");
+
+            if (
+              [
+                ".js",
+                ".css",
+                ".png",
+                ".jpg",
+                ".jpeg",
+                ".gif",
+                ".svg",
+                ".woff",
+                ".woff2",
+                ".ico",
+              ].includes(ext)
+            ) {
+              res.set("Cache-Control", "public, max-age=86400"); // 24h au lieu d'1 an pour éviter les problèmes de cache
+            }
+
+            // MIME types corrects avec encodage
+            const mimeTypes = {
+              ".html": "text/html; charset=utf-8",
+              ".js": "application/javascript; charset=utf-8",
+              ".css": "text/css; charset=utf-8",
+              ".json": "application/json; charset=utf-8",
+              ".png": "image/png",
+              ".jpg": "image/jpeg",
+              ".jpeg": "image/jpeg",
+              ".gif": "image/gif",
+              ".svg": "image/svg+xml; charset=utf-8",
+              ".ico": "image/x-icon",
+              ".woff": "font/woff",
+              ".woff2": "font/woff2",
+              ".ttf": "font/ttf",
+              ".otf": "font/otf",
+            };
+
+            if (mimeTypes[ext]) {
+              res.set("Content-Type", mimeTypes[ext]);
+            }
+
+            // Headers spéciaux pour CSS et JS
+            if (ext === ".css") {
+              res.set("Content-Type", "text/css; charset=utf-8");
+              res.set("Cache-Control", "public, max-age=3600"); // Cache plus court pour CSS
+            }
+
+            if (ext === ".js") {
+              res.set("Content-Type", "application/javascript; charset=utf-8");
+              res.set("Cache-Control", "public, max-age=3600"); // Cache plus court pour JS
+            }
+
+            return res.sendFile(location);
           }
-        } catch (listError) {
-          console.log(`❌ Impossible de lister les fichiers de ${projectId}`);
+        } catch (err) {
+          // Continue vers l'emplacement suivant
+          continue;
         }
       }
-    } catch (error) {
-      console.error(
-        `❌ Erreur serveur statique pour ${projectId}/${filePath}:`,
-        error
+
+      console.log(
+        `❌ Fichier non trouvé dans tous les emplacements: ${filePath}`
       );
+
+      // Debug: Lister les fichiers disponibles
+      try {
+        console.log(`🔍 Debug pour ${projectId}:`);
+
+        const projectFiles = await fs.readdir(projectDir);
+        console.log(
+          `📁 Racine (${projectFiles.length} fichiers):`,
+          projectFiles.slice(0, 5)
+        );
+
+        // Vérifier le dossier assets
+        const assetsDir = path.join(projectDir, "assets");
+        try {
+          const assetsFiles = await fs.readdir(assetsDir);
+          console.log(
+            `📁 Assets (${assetsFiles.length} fichiers):`,
+            assetsFiles.slice(0, 5)
+          );
+        } catch (e) {
+          console.log(`📁 Pas de dossier assets/`);
+        }
+
+        // Vérifier le dossier dist
+        const distDir = path.join(projectDir, "dist");
+        try {
+          const distFiles = await fs.readdir(distDir);
+          console.log(
+            `📁 Dist (${distFiles.length} fichiers):`,
+            distFiles.slice(0, 5)
+          );
+
+          const distAssetsDir = path.join(distDir, "assets");
+          try {
+            const distAssetsFiles = await fs.readdir(distAssetsDir);
+            console.log(
+              `📁 Dist/Assets (${distAssetsFiles.length} fichiers):`,
+              distAssetsFiles.slice(0, 5)
+            );
+          } catch (e) {
+            console.log(`📁 Pas de dossier dist/assets/`);
+          }
+        } catch (e) {
+          console.log(`📁 Pas de dossier dist/`);
+        }
+      } catch (debugError) {
+        console.log(`❌ Debug impossible: ${debugError.message}`);
+      }
+
+      // Fallback vers index.html pour les SPA
+      const indexLocations = [
+        path.join(projectDir, "index.html"),
+        path.join(projectDir, "dist", "index.html"),
+      ];
+
+      for (const indexPath of indexLocations) {
+        try {
+          await fs.access(indexPath);
+          console.log(
+            `🔄 Fallback SPA vers: ${indexPath.replace(this.publicDir, "")}`
+          );
+          return res.sendFile(indexPath);
+        } catch (e) {
+          continue;
+        }
+      }
+
+      // Si aucun index.html trouvé
+      console.log(`❌ Aucun index.html trouvé pour ${projectId}`);
+      return this.serveProjectNotFoundPage(res, projectId);
+    } catch (error) {
+      console.error(`❌ Erreur serveur statique:`, error);
       res.status(500).json({
-        error: "Erreur interne",
-        message: "Impossible de servir le fichier",
+        error: "Erreur interne du serveur",
         projectId,
         filePath,
+        message: error.message,
       });
     }
   }
