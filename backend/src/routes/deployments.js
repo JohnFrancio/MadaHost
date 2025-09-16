@@ -315,371 +315,6 @@ router.delete("/:deploymentId", requireAuth, async (req, res) => {
   }
 });
 
-// async function deployProject(deploymentId, project) {
-//   try {
-//     console.log(
-//       `🚀 Démarrage déploiement ${deploymentId} pour ${project.name}`
-//     );
-
-//     const deploymentDir = path.join(__dirname, "../../temp", deploymentId);
-//     const outputDir = path.join(__dirname, "../../public", project.id);
-//     let buildLog = "";
-
-//     // Mettre à jour le statut
-//     buildLog += `🚀 [${new Date().toISOString()}] Démarrage du déploiement...\n`;
-//     await supabase
-//       .from("deployments")
-//       .update({
-//         status: "cloning",
-//         build_log: buildLog,
-//       })
-//       .eq("id", deploymentId);
-
-//     // Créer les dossiers
-//     await fs.mkdir(deploymentDir, { recursive: true });
-//     await fs.mkdir(outputDir, { recursive: true });
-
-//     // Récupérer le token GitHub
-//     const { data: user } = await supabase
-//       .from("users")
-//       .select("access_token")
-//       .eq("id", project.user_id)
-//       .single();
-
-//     if (!user?.access_token) {
-//       throw new Error("Token GitHub manquant pour l'utilisateur");
-//     }
-
-//     // Cloner avec le token
-//     buildLog += `📥 [${new Date().toISOString()}] Clonage de ${
-//       project.github_repo
-//     }...\n`;
-//     await updateDeploymentLog(deploymentId, buildLog);
-
-//     const cloneCommand = `git clone --depth 1 -b ${
-//       project.branch || "main"
-//     } https://${user.access_token}@github.com/${
-//       project.github_repo
-//     }.git ${deploymentDir}`;
-//     await execCommand(cloneCommand);
-//     buildLog += `✅ Repository cloné avec succès\n`;
-
-//     // Récupérer le commit hash
-//     try {
-//       const commitHash = await execCommand(
-//         `cd ${deploymentDir} && git rev-parse HEAD`
-//       );
-//       await supabase
-//         .from("deployments")
-//         .update({ commit_hash: commitHash.trim() })
-//         .eq("id", deploymentId);
-//       buildLog += `📋 Commit: ${commitHash.trim().substring(0, 8)}\n`;
-//     } catch (error) {
-//       buildLog += `⚠️ Impossible de récupérer le commit hash\n`;
-//     }
-
-//     // Installation des dépendances
-//     await supabase
-//       .from("deployments")
-//       .update({ status: "building", build_log: buildLog })
-//       .eq("id", deploymentId);
-
-//     const packageJsonPath = path.join(deploymentDir, "package.json");
-//     try {
-//       await fs.access(packageJsonPath);
-
-//       buildLog += `📦 [${new Date().toISOString()}] Installation des dépendances...\n`;
-//       await updateDeploymentLog(deploymentId, buildLog);
-
-//       const installCmd = project.install_command || "npm install";
-//       buildLog += `🔧 Commande: ${installCmd}\n`;
-
-//       await execCommand(`cd ${deploymentDir} && ${installCmd}`);
-//       buildLog += `✅ Dépendances installées\n`;
-//     } catch (error) {
-//       buildLog += `⚠️ Pas de package.json ou erreur installation\n`;
-//     }
-
-//     // Build du projet
-//     // if (project.build_command) {
-//     //   buildLog += `🏗️ [${new Date().toISOString()}] Build du projet...\n`;
-//     //   buildLog += `🔧 Commande: ${project.build_command}\n`;
-//     //   await updateDeploymentLog(deploymentId, buildLog);
-
-//     //   try {
-//     //     await execCommand(`cd ${deploymentDir} && ${project.build_command}`);
-//     //     buildLog += `✅ Build réussi\n`;
-//     //   } catch (buildError) {
-//     //     buildLog += `⚠️ Build échoué, copie des fichiers source\n`;
-//     //   }
-//     // }
-//     if (project.build_command) {
-//       buildLog += `🏗️ [${new Date().toISOString()}] Build du projet...\n`;
-//       buildLog += `🔧 Commande: ${project.build_command}\n`;
-//       await updateDeploymentLog(deploymentId, buildLog);
-
-//       try {
-//         // Pour Vite, assurer que les assets ont les bons chemins relatifs
-//         const viteConfigPath = path.join(deploymentDir, "vite.config.js");
-//         const packageJsonPath = path.join(deploymentDir, "package.json");
-
-//         // Vérifier si c'est un projet Vite
-//         let isViteProject = false;
-//         try {
-//           const packageJson = JSON.parse(
-//             await fs.readFile(packageJsonPath, "utf8")
-//           );
-//           isViteProject =
-//             packageJson.devDependencies?.vite || packageJson.dependencies?.vite;
-//           buildLog += `🔍 Projet Vite détecté: ${!!isViteProject}\n`;
-//         } catch (e) {
-//           buildLog += `⚠️ Impossible de lire package.json\n`;
-//         }
-
-//         // Si c'est Vite, créer/modifier la config pour les chemins relatifs
-//         if (isViteProject) {
-//           const viteConfig = `import { defineConfig } from 'vite'
-//             import react from '@vitejs/plugin-react'
-
-//             export default defineConfig({
-//               plugins: [react()],
-//               base: './',  // CRUCIAL: chemins relatifs pour les assets
-//               build: {
-//                 outDir: 'dist',
-//                 assetsDir: 'assets'
-//               }
-//             })`;
-//           await fs.writeFile(viteConfigPath, viteConfig);
-//           buildLog += `⚙️ Configuration Vite mise à jour pour chemins relatifs\n`;
-//         }
-
-//         await execCommand(
-//           `cd ${deploymentDir} && NODE_ENV=production ${project.build_command}`
-//         );
-//         buildLog += `✅ Build réussi\n`;
-//       } catch (buildError) {
-//         buildLog += `⚠️ Build échoué: ${buildError.message}\n`;
-//         buildLog += `📁 Tentative de déploiement des fichiers source...\n`;
-//       }
-//     }
-
-//     // Après le build, vérifier la taille du CSS
-//     const cssFiles = await fs
-//       .readdir(path.join(deploymentDir, "dist/assets"))
-//       .then((files) => files.filter((f) => f.endsWith(".css")));
-
-//     for (const cssFile of cssFiles) {
-//       const cssPath = path.join(deploymentDir, "dist/assets", cssFile);
-//       const cssContent = await fs.readFile(cssPath, "utf8");
-
-//       buildLog += `📏 ${cssFile}: ${cssContent.length} caractères\n`;
-
-//       // Si le CSS ne contient que les directives @tailwind, c'est un problème
-//       if (cssContent.includes("@tailwind") && cssContent.length < 10000) {
-//         buildLog += `❌ Tailwind pas compilé dans ${cssFile}\n`;
-
-//         // Solution d'urgence : build Tailwind manuellement
-//         try {
-//           await execCommand(
-//             `cd ${deploymentDir} && npx tailwindcss -i src/index.css -o dist/assets/${cssFile} --minify`
-//           );
-//           buildLog += `🔧 Tailwind recompilé manuellement\n`;
-//         } catch (e) {
-//           buildLog += `⚠️ Échec recompilation: ${e.message}\n`;
-//         }
-//       }
-//     }
-
-//     // Copie des fichiers - CORRECTION ICI
-//     await supabase
-//       .from("deployments")
-//       .update({ status: "deploying", build_log: buildLog })
-//       .eq("id", deploymentId);
-
-//     buildLog += `📁 [${new Date().toISOString()}] Copie des fichiers...\n`;
-//     await updateDeploymentLog(deploymentId, buildLog);
-
-//     const outputDirectory = project.output_dir || "dist";
-//     const sourceDir = path.join(deploymentDir, outputDirectory);
-
-//     // Debug: vérifier l'existence du dossier
-//     buildLog += `🔍 Vérification dossier source: ${sourceDir}\n`;
-
-//     try {
-//       // Lister le contenu du dossier de déploiement pour debug
-//       const tempContent = await execCommand(`ls -la "${deploymentDir}"`);
-//       buildLog += `📋 Contenu dossier temp:\n${tempContent}`;
-
-//       // Vérifier si le dossier de build existe
-//       await fs.access(sourceDir);
-//       buildLog += `✅ Dossier ${outputDirectory} trouvé\n`;
-
-//       // Lister le contenu du dossier dist pour debug
-//       const distContent = await execCommand(`ls -la "${sourceDir}"`);
-//       buildLog += `📁 Contenu du dossier ${outputDirectory}:\n${distContent}`;
-
-//       // CORRECTION: Nettoyer et recréer le dossier de destination
-//       await execCommand(`rm -rf "${outputDir}"/*`);
-//       await execCommand(`mkdir -p "${outputDir}"`);
-
-//       // Copier TOUT le contenu en préservant la structure
-//       await execCommand(`cp -r "${sourceDir}/"* "${outputDir}/"`);
-//       buildLog += `✅ Tous les fichiers copiés depuis ${outputDirectory} avec structure préservée\n`;
-
-//       // Vérifier la structure finale copiée
-//       const finalStructure = await execCommand(`find "${outputDir}" -type f`);
-//       buildLog += `📊 Structure finale:\n${finalStructure}`;
-
-//       // Vérifier spécifiquement le dossier assets
-//       try {
-//         const assetsContent = await execCommand(
-//           `ls -la "${outputDir}/assets/"`
-//         );
-//         buildLog += `📁 Contenu du dossier assets:\n${assetsContent}`;
-//       } catch (assetsError) {
-//         buildLog += `⚠️ Pas de dossier assets dans la destination finale\n`;
-//       }
-//     } catch (error) {
-//       buildLog += `⚠️ Dossier ${outputDirectory} introuvable, tentative copie alternative...\n`;
-
-//       try {
-//         // Alternative: Copier récursivement tous les fichiers statiques
-//         await execCommand(
-//           `rsync -av --include="*/" --include="*.html" --include="*.css" --include="*.js" --include="*.png" --include="*.jpg" --include="*.svg" --include="*.ico" --include="*.gif" --include="*.woff*" --include="*.ttf" --exclude="*" "${deploymentDir}/" "${outputDir}/"`
-//         );
-//         buildLog += `✅ Fichiers statiques copiés avec rsync\n`;
-//       } catch (rsyncError) {
-//         // Dernière tentative: copie basique
-//         await execCommand(
-//           `find "${deploymentDir}" -maxdepth 3 \\( -name "*.html" -o -name "*.css" -o -name "*.js" -o -name "*.png" -o -name "*.jpg" -o -name "*.gif" -o -name "*.svg" -o -name "*.ico" -o -name "*.woff*" -o -name "*.ttf" \\) -exec cp {} "${outputDir}/" \\; 2>/dev/null || true`
-//         );
-//         buildLog += `✅ Fichiers statiques copiés (méthode basique)\n`;
-//       }
-//     }
-//     const indexPath = path.join(outputDir, "index.html");
-//     try {
-//       let indexContent = await fs.readFile(indexPath, "utf8");
-
-//       buildLog += `🔧 [${new Date().toISOString()}] Correction des chemins dans index.html...\n`;
-
-//       // Remplacer les chemins absolus par des chemins relatifs
-//       indexContent = indexContent
-//         .replace(/href="\/assets\//g, 'href="./assets/')
-//         .replace(/src="\/assets\//g, 'src="./assets/')
-//         .replace(/href="\//g, 'href="./')
-//         .replace(/src="\//g, 'src="./');
-
-//       await fs.writeFile(indexPath, indexContent);
-//       buildLog += `✅ Chemins corrigés dans index.html\n`;
-
-//       // Vérifier que les fichiers CSS/JS référencés existent
-//       const cssMatches =
-//         indexContent.match(/href="\.\/assets\/[^"]+\.css"/g) || [];
-//       const jsMatches =
-//         indexContent.match(/src="\.\/assets\/[^"]+\.js"/g) || [];
-
-//       buildLog += `🎨 Fichiers CSS référencés: ${cssMatches.length}\n`;
-//       buildLog += `📜 Fichiers JS référencés: ${jsMatches.length}\n`;
-
-//       // Vérifier l'existence des fichiers CSS
-//       for (const cssMatch of cssMatches) {
-//         const cssFile = cssMatch.match(/href="(.+)"/)[1].replace("./", "");
-//         const cssPath = path.join(outputDir, cssFile);
-//         try {
-//           await fs.access(cssPath);
-//           buildLog += `✅ CSS trouvé: ${cssFile}\n`;
-//         } catch (e) {
-//           buildLog += `❌ CSS manquant: ${cssFile}\n`;
-//         }
-//       }
-//     } catch (indexFixError) {
-//       buildLog += `⚠️ Impossible de corriger index.html: ${indexFixError.message}\n`;
-//     }
-
-//     // Lister la structure finale pour debug
-//     try {
-//       const structure = await execCommand(
-//         `find "${outputDir}" -type f | head -20`
-//       );
-//       buildLog += `📊 Structure finale (20 premiers fichiers):\n${structure}`;
-//     } catch (listError) {
-//       buildLog += `⚠️ Impossible de lister la structure finale\n`;
-//     }
-//     // Lister les fichiers copiés pour debug
-//     try {
-//       const fileList = await execCommand(`ls -la "${outputDir}"`);
-//       buildLog += `📋 Contenu du dossier de déploiement:\n${fileList}`;
-//     } catch (listError) {
-//       buildLog += `⚠️ Impossible de lister les fichiers copiés\n`;
-//     }
-
-//     // Configuration domaine
-//     await supabase
-//       .from("deployments")
-//       .update({ status: "configuring", build_log: buildLog })
-//       .eq("id", deploymentId);
-
-//     const domain = `${project.name
-//       .toLowerCase()
-//       .replace(/[^a-z0-9]/g, "-")}.madahost.me`;
-
-//     await supabase
-//       .from("projects")
-//       .update({
-//         domain,
-//         status: "active",
-//         last_deployed: new Date().toISOString(),
-//       })
-//       .eq("id", project.id);
-
-//     buildLog += `✅ [${new Date().toISOString()}] Déploiement réussi!\n`;
-//     buildLog += `🌐 Site disponible: http://localhost:3002/project/${project.id}/\n`;
-
-//     // Succès final
-//     await supabase
-//       .from("deployments")
-//       .update({
-//         status: "success",
-//         build_log: buildLog,
-//         completed_at: new Date().toISOString(),
-//       })
-//       .eq("id", deploymentId);
-
-//     // Nettoyer après 10 secondes
-//     setTimeout(async () => {
-//       try {
-//         await execCommand(`rm -rf ${deploymentDir}`);
-//         console.log(`🧹 Nettoyage terminé: ${deploymentDir}`);
-//       } catch (error) {
-//         console.error("❌ Erreur nettoyage:", error);
-//       }
-//     }, 10000);
-//   } catch (error) {
-//     console.error(`❌ Erreur déploiement ${deploymentId}:`, error);
-
-//     await supabase
-//       .from("deployments")
-//       .update({
-//         status: "failed",
-//         build_log: `❌ [${new Date().toISOString()}] Erreur: ${
-//           error.message
-//         }\n`,
-//         completed_at: new Date().toISOString(),
-//       })
-//       .eq("id", deploymentId);
-
-//     // Nettoyer en cas d'erreur
-//     try {
-//       await execCommand(
-//         `rm -rf ${path.join(__dirname, "../../temp", deploymentId)}`
-//       );
-//     } catch (cleanupError) {
-//       console.error("❌ Erreur nettoyage:", cleanupError);
-//     }
-//   }
-// }
-
-// Fonction deployProject complète avec toutes nos corrections précédentes + nouvelle fonctionnalité
 async function deployProject(deploymentId, project) {
   try {
     console.log(
@@ -743,9 +378,9 @@ async function deployProject(deploymentId, project) {
       buildLog += `⚠️ Impossible de récupérer le commit hash\n`;
     }
 
-    // ==================== DÉTECTION AUTOMATIQUE DES FRAMEWORKS ====================
+    // ==================== DÉTECTION ET INSTALLATION AUTOMATIQUE ====================
 
-    buildLog += `🔍 [${new Date().toISOString()}] Détection des frameworks...\n`;
+    buildLog += `🔍 [${new Date().toISOString()}] Détection des frameworks et dépendances...\n`;
     await updateDeploymentLog(deploymentId, buildLog);
 
     const frameworkHandler = new UniversalFrameworkHandler();
@@ -754,27 +389,23 @@ async function deployProject(deploymentId, project) {
     buildLog += detectionLog;
 
     if (frameworks.length === 0) {
-      buildLog += `ℹ️ Aucun framework CSS/JS spécial détecté, build standard\n`;
+      buildLog += `ℹ️ Aucun framework CSS/JS spécial détecté\n`;
     } else {
       buildLog += `🎯 Frameworks détectés: ${frameworks.join(", ")}\n`;
-
-      // Configuration automatique des frameworks
-      const { buildLog: setupLog, missingDeps } =
-        await frameworkHandler.setupFrameworks(
-          deploymentDir,
-          frameworks,
-          buildLog
-        );
-      buildLog = setupLog;
-
-      if (missingDeps.length > 0) {
-        buildLog += `📦 Dépendances ajoutées: ${missingDeps.join(", ")}\n`;
-      }
     }
 
-    // ==================== FIN DÉTECTION FRAMEWORKS ====================
+    // Configuration et installation des dépendances manquantes
+    const { buildLog: setupLog, missingDeps } =
+      await frameworkHandler.setupFrameworks(
+        deploymentDir,
+        frameworks,
+        buildLog
+      );
+    buildLog = setupLog;
 
-    // Installation des dépendances (maintenant avec les nouvelles dépendances)
+    // ==================== FIN DÉTECTION ====================
+
+    // Installation des dépendances (avec les nouvelles dépendances)
     await supabase
       .from("deployments")
       .update({ status: "building", build_log: buildLog })
@@ -785,6 +416,9 @@ async function deployProject(deploymentId, project) {
       await fs.access(packageJsonPath);
 
       buildLog += `📦 [${new Date().toISOString()}] Installation des dépendances...\n`;
+      if (missingDeps.length > 0) {
+        buildLog += `🔧 Nouvelles dépendances: ${missingDeps.join(", ")}\n`;
+      }
       await updateDeploymentLog(deploymentId, buildLog);
 
       const installCmd = project.install_command || "npm install";
@@ -796,73 +430,59 @@ async function deployProject(deploymentId, project) {
       buildLog += `⚠️ Pas de package.json ou erreur installation\n`;
     }
 
-    // Build du projet avec configuration universelle
+    // Build du projet
     if (project.build_command) {
       buildLog += `🏗️ [${new Date().toISOString()}] Build du projet...\n`;
       buildLog += `🔧 Commande: ${project.build_command}\n`;
       await updateDeploymentLog(deploymentId, buildLog);
 
       try {
-        // Vérifier si c'est un projet Vite et corriger la configuration de base
-        const packageJsonPath = path.join(deploymentDir, "package.json");
-        let isViteProject = false;
-
-        try {
-          const packageJson = JSON.parse(
-            await fs.readFile(packageJsonPath, "utf8")
-          );
-          isViteProject =
-            packageJson.devDependencies?.vite || packageJson.dependencies?.vite;
-          buildLog += `🔍 Projet Vite détecté: ${!!isViteProject}\n`;
-        } catch (e) {
-          buildLog += `⚠️ Impossible de lire package.json\n`;
-        }
-
-        // Variables d'environnement universelles
-        const universalEnv = {
+        // Variables d'environnement optimisées
+        const buildEnv = {
           NODE_ENV: "production",
           TAILWIND_MODE: frameworks.includes("tailwind") ? "build" : undefined,
           VITE_NODE_ENV: "production",
           CI: "true",
         };
 
-        // Build avec configuration optimisée
         await execCommand(
           `cd ${deploymentDir} && ${project.build_command}`,
-          universalEnv
+          buildEnv
         );
         buildLog += `✅ Build réussi\n`;
-
-        // Vérification post-build universelle
-        buildLog += `🔍 Vérification du build...\n`;
-        buildLog = await verifyUniversalBuild(
-          deploymentDir,
-          frameworks,
-          buildLog
-        );
       } catch (buildError) {
         buildLog += `⚠️ Build échoué: ${buildError.message}\n`;
 
-        // Tentative de build alternatif pour Tailwind
-        if (frameworks.includes("tailwind")) {
-          buildLog += `🔄 Tentative de build Tailwind manuel...\n`;
+        // Tentative de build sans minification en cas d'erreur terser
+        if (buildError.message.includes("terser")) {
+          buildLog += `🔄 Tentative build sans minification...\n`;
           try {
-            // Build Tailwind en premier
-            await execCommand(
-              `cd ${deploymentDir} && npx tailwindcss -i src/index.css -o dist/assets/index.css --minify`
-            );
-            buildLog += `✅ Tailwind compilé manuellement\n`;
+            // Modifier temporairement vite.config.js pour désactiver terser
+            const viteConfigPath = path.join(deploymentDir, "vite.config.js");
+            const noMinifyConfig = `import { defineConfig } from 'vite'
+              import react from '@vitejs/plugin-react'
 
-            // Puis relancer le build principal
+              export default defineConfig({
+                plugins: [react()],
+                base: './',
+                build: {
+                  minify: false,  // Désactiver la minification
+                  outDir: 'dist',
+                  assetsDir: 'assets'
+                }
+              })`;
+            await fs.writeFile(viteConfigPath, noMinifyConfig);
+
             await execCommand(
-              `cd ${deploymentDir} && ${project.build_command}`,
-              { NODE_ENV: "production" }
+              `cd ${deploymentDir} && ${project.build_command}`
             );
-            buildLog += `✅ Build principal réussi après Tailwind\n`;
+            buildLog += `✅ Build réussi sans minification\n`;
           } catch (e) {
             buildLog += `❌ Échec build alternatif: ${e.message}\n`;
-            // Continue malgré l'erreur
+            throw buildError; // Rethrow l'erreur originale
           }
+        } else {
+          throw buildError;
         }
       }
     }
@@ -1036,125 +656,6 @@ async function deployProject(deploymentId, project) {
   }
 }
 
-// Fonction de vérification universelle corrigée
-async function verifyUniversalBuild(deploymentDir, frameworks, buildLog) {
-  const distPath = path.join(deploymentDir, "dist");
-  const assetsPath = path.join(distPath, "assets");
-
-  try {
-    // Vérifier que dist existe
-    const distExists = await fs
-      .access(distPath)
-      .then(() => true)
-      .catch(() => false);
-    if (!distExists) {
-      buildLog += `❌ Dossier dist/ non trouvé\n`;
-      return buildLog;
-    }
-
-    // Vérifier les assets
-    const assetsExists = await fs
-      .access(assetsPath)
-      .then(() => true)
-      .catch(() => false);
-    if (assetsExists) {
-      const assets = await fs.readdir(assetsPath);
-      const cssFiles = assets.filter((f) => f.endsWith(".css"));
-      const jsFiles = assets.filter((f) => f.endsWith(".js"));
-
-      buildLog += `📁 Assets générés: ${cssFiles.length} CSS, ${jsFiles.length} JS\n`;
-
-      // Vérifications spécifiques par framework
-      for (const cssFile of cssFiles) {
-        const cssPath = path.join(assetsPath, cssFile);
-        const cssContent = await fs.readFile(cssPath, "utf8");
-        const cssSize = cssContent.length;
-
-        buildLog += `📄 ${cssFile}: ${cssSize} caractères\n`;
-
-        // Vérification Tailwind
-        if (frameworks.includes("tailwind")) {
-          if (cssContent.includes("@tailwind") && cssSize < 10000) {
-            buildLog += `⚠️ Tailwind non compilé dans ${cssFile}\n`;
-
-            // Tentative de recompilation
-            try {
-              await execCommand(
-                `cd ${deploymentDir} && npx tailwindcss -o dist/assets/${cssFile} --minify`
-              );
-              const newContent = await fs.readFile(cssPath, "utf8");
-              buildLog += `🔧 Tailwind recompilé (${newContent.length} caractères)\n`;
-            } catch (e) {
-              buildLog += `❌ Échec recompilation: ${e.message}\n`;
-            }
-          } else if (cssSize > 10000) {
-            buildLog += `✅ Tailwind correctement compilé\n`;
-          }
-        }
-
-        // Vérification AOS
-        if (frameworks.includes("aos")) {
-          if (
-            cssContent.includes(".aos-animate") ||
-            cssContent.includes("[data-aos]")
-          ) {
-            buildLog += `✅ Styles AOS trouvés\n`;
-          } else {
-            buildLog += `⚠️ Styles AOS manquants\n`;
-          }
-        }
-
-        // Vérification Bootstrap/Bulma
-        if (
-          frameworks.includes("bootstrap") &&
-          cssContent.includes(".container")
-        ) {
-          buildLog += `✅ Styles Bootstrap trouvés\n`;
-        }
-        if (frameworks.includes("bulma") && cssContent.includes(".button")) {
-          buildLog += `✅ Styles Bulma trouvés\n`;
-        }
-      }
-    } else {
-      buildLog += `⚠️ Dossier assets/ non trouvé\n`;
-    }
-
-    // Vérifier index.html
-    const indexPath = path.join(distPath, "index.html");
-    const indexExists = await fs
-      .access(indexPath)
-      .then(() => true)
-      .catch(() => false);
-    if (indexExists) {
-      const indexContent = await fs.readFile(indexPath, "utf8");
-      buildLog += `📝 index.html: ${indexContent.length} caractères\n`;
-
-      // Vérifier les liens vers les assets
-      const cssLinks = (indexContent.match(/href="[^"]*\.css"/g) || []).length;
-      const jsLinks = (indexContent.match(/src="[^"]*\.js"/g) || []).length;
-
-      buildLog += `🔗 Liens CSS: ${cssLinks}, Liens JS: ${jsLinks}\n`;
-
-      // Corriger les chemins si nécessaire
-      if (
-        indexContent.includes('href="/assets/') ||
-        indexContent.includes('src="/assets/')
-      ) {
-        const correctedContent = indexContent
-          .replace(/href="\/assets\//g, 'href="./assets/')
-          .replace(/src="\/assets\//g, 'src="./assets/');
-
-        await fs.writeFile(indexPath, correctedContent);
-        buildLog += `🔧 Chemins absolus corrigés en relatifs\n`;
-      }
-    }
-  } catch (error) {
-    buildLog += `⚠️ Erreur vérification: ${error.message}\n`;
-  }
-
-  return buildLog;
-}
-
 // Fonction utilitaire pour mettre à jour les logs
 async function updateDeploymentLog(deploymentId, buildLog) {
   try {
@@ -1167,19 +668,6 @@ async function updateDeploymentLog(deploymentId, buildLog) {
   }
 }
 
-// Fonction utilitaire pour exécuter des commandes
-// function execCommand(command, timeout = 300000) {
-//   return new Promise((resolve, reject) => {
-//     exec(command, { timeout }, (error, stdout, stderr) => {
-//       if (error) {
-//         const errorMessage = `Command: ${command}\nError: ${error.message}\nStdout: ${stdout}\nStderr: ${stderr}`;
-//         reject(new Error(errorMessage));
-//         return;
-//       }
-//       resolve(stdout);
-//     });
-//   });
-// }
 function execCommand(command, envVars = {}, timeout = 300000) {
   return new Promise((resolve, reject) => {
     const options = {

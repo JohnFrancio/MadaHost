@@ -209,6 +209,15 @@ class UniversalFrameworkHandler {
     };
     const missingDeps = [];
 
+    // Vérifier si c'est un projet Vite et ajouter terser automatiquement
+    const isViteProject =
+      allDeps.vite || packageJson.scripts?.build?.includes("vite");
+    if (isViteProject && !allDeps.terser) {
+      missingDeps.push("terser");
+      buildLog += `🔧 Terser manquant pour projet Vite - ajout automatique\n`;
+    }
+
+    // Ajouter les dépendances des frameworks détectés
     for (const framework of frameworks) {
       const config = this.supportedFrameworks[framework];
       if (config) {
@@ -238,6 +247,7 @@ class UniversalFrameworkHandler {
         gsap: "^3.12.0",
         bootstrap: "^5.3.0",
         bulma: "^0.9.4",
+        terser: "^5.19.0", // CRUCIAL pour Vite
       };
 
       for (const dep of missingDeps) {

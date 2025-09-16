@@ -2,12 +2,12 @@
 import { useAuthStore } from "@/stores/auth";
 import { useThemeStore } from "@/stores/theme";
 import ThemeSwitcher from "./ThemeSwitcher.vue";
-import { 
-  Bars3Icon, 
+import {
+  Bars3Icon,
   XMarkIcon,
   UserCircleIcon,
   ArrowRightOnRectangleIcon,
-  Cog6ToothIcon
+  Cog6ToothIcon,
 } from "@heroicons/vue/24/outline";
 import { ref } from "vue";
 
@@ -17,7 +17,9 @@ const mobileMenuOpen = ref(false);
 </script>
 
 <template>
-  <nav class="bg-white dark:bg-gray-900 shadow-sm border-b border-gray-200 dark:border-gray-800 transition-colors">
+  <nav
+    class="bg-white dark:bg-gray-900 shadow-sm border-b border-gray-200 dark:border-gray-800 transition-colors"
+  >
     <div class="container mx-auto px-4">
       <div class="flex justify-between items-center h-16">
         <!-- Logo -->
@@ -28,10 +30,13 @@ const mobileMenuOpen = ref(false);
             <span class="text-white font-bold text-lg">M</span>
           </div>
           <div class="hidden sm:block">
-            <span class="text-xl font-bold bg-gradient-to-r from-gray-900 to-gray-600 dark:from-white dark:to-gray-300 bg-clip-text text-transparent"
+            <span
+              class="text-xl font-bold bg-gradient-to-r from-gray-900 to-gray-600 dark:from-white dark:to-gray-300 bg-clip-text text-transparent"
               >MadaHost</span
             >
-            <div class="text-xs text-gray-500 dark:text-gray-400 -mt-1">Deploy Platform</div>
+            <div class="text-xs text-gray-500 dark:text-gray-400 -mt-1">
+              Deploy Platform
+            </div>
           </div>
         </router-link>
 
@@ -43,7 +48,9 @@ const mobileMenuOpen = ref(false);
               class="text-gray-600 dark:text-gray-300 hover:text-primary-600 dark:hover:text-primary-400 px-3 py-2 rounded-lg text-sm font-medium transition-colors relative group"
             >
               Dashboard
-              <div class="absolute inset-x-0 bottom-0 h-0.5 bg-primary-600 scale-x-0 group-hover:scale-x-100 transition-transform origin-left"></div>
+              <div
+                class="absolute inset-x-0 bottom-0 h-0.5 bg-primary-600 scale-x-0 group-hover:scale-x-100 transition-transform origin-left"
+              ></div>
             </router-link>
           </template>
         </div>
@@ -56,7 +63,9 @@ const mobileMenuOpen = ref(false);
           <!-- User Menu Desktop -->
           <template v-if="authStore.isAuthenticated">
             <div class="hidden md:flex items-center space-x-4">
-              <div class="flex items-center space-x-3 px-3 py-2 rounded-lg bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700">
+              <div
+                class="flex items-center space-x-3 px-3 py-2 rounded-lg bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700"
+              >
                 <img
                   v-if="authStore.user?.avatar_url"
                   :src="authStore.user.avatar_url"
@@ -65,7 +74,9 @@ const mobileMenuOpen = ref(false);
                 />
                 <UserCircleIcon v-else class="w-8 h-8 text-gray-400" />
                 <div class="text-left">
-                  <div class="text-sm font-medium text-gray-900 dark:text-white">
+                  <div
+                    class="text-sm font-medium text-gray-900 dark:text-white"
+                  >
                     {{ authStore.user?.username }}
                   </div>
                   <div class="text-xs text-gray-500 dark:text-gray-400">
@@ -73,7 +84,7 @@ const mobileMenuOpen = ref(false);
                   </div>
                 </div>
               </div>
-              
+
               <button
                 @click="authStore.logout"
                 class="p-2 text-gray-500 dark:text-gray-400 hover:text-red-600 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors"
@@ -85,10 +96,10 @@ const mobileMenuOpen = ref(false);
           </template>
 
           <template v-else>
-            <router-link 
-              to="/login" 
+            <router-link
+              to="/login"
               class="bg-gradient-to-r from-primary-600 to-primary-700 hover:from-primary-700 hover:to-primary-800 text-white px-6 py-2 rounded-lg font-medium transition-all duration-200 shadow-lg hover:shadow-xl transform hover:-translate-y-0.5"
-          >
+            >
               Se connecter
             </router-link>
           </template>
@@ -120,7 +131,9 @@ const mobileMenuOpen = ref(false);
           <div class="px-4 py-4 space-y-3">
             <template v-if="authStore.isAuthenticated">
               <!-- User info mobile -->
-              <div class="flex items-center space-x-3 p-3 bg-gray-50 dark:bg-gray-800 rounded-lg">
+              <div
+                class="flex items-center space-x-3 p-3 bg-gray-50 dark:bg-gray-800 rounded-lg"
+              >
                 <img
                   v-if="authStore.user?.avatar_url"
                   :src="authStore.user.avatar_url"
@@ -181,7 +194,7 @@ const mobileMenuOpen = ref(false);
 }
 
 .nav-link::before {
-  content: '';
+  content: "";
   position: absolute;
   bottom: 0;
   left: 0;
@@ -197,47 +210,16 @@ const mobileMenuOpen = ref(false);
 
 /* Animation pour le logo */
 @keyframes float {
-  0%, 100% { transform: translateY(0px); }
-  50% { transform: translateY(-2px); }
+  0%,
+  100% {
+    transform: translateY(0px);
+  }
+  50% {
+    transform: translateY(-2px);
+  }
 }
 
 .logo-float:hover {
   animation: float 2s ease-in-out infinite;
 }
 </style>
-            >
-              Dashboard
-            </router-link>
-
-            <!-- User menu -->
-            <div class="relative">
-              <div class="flex items-center space-x-3">
-                <img
-                  v-if="authStore.user?.avatar_url"
-                  :src="authStore.user.avatar_url"
-                  :alt="authStore.user.username"
-                  class="w-8 h-8 rounded-full"
-                />
-                <span class="text-sm font-medium text-gray-700">
-                  {{ authStore.user?.username }}
-                </span>
-                <button
-                  @click="authStore.logout"
-                  class="text-gray-500 hover:text-gray-700 text-sm"
-                >
-                  Déconnexion
-                </button>
-              </div>
-            </div>
-          </template>
-
-          <template v-else>
-            <router-link to="/login" class="btn-primary">
-              Se connecter
-            </router-link>
-          </template>
-        </div>
-      </div>
-    </div>
-  </nav>
-</template>

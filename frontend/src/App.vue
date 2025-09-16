@@ -16,7 +16,7 @@ const notificationsStore = useNotificationsStore();
 onMounted(async () => {
   // Initialiser le thème
   themeStore.init();
-  
+
   try {
     // Vérifier l'état d'authentification
     await authStore.checkAuth();
@@ -61,13 +61,20 @@ window.addEventListener("unhandledrejection", (event) => {
 });
 
 // Appliquer le thème au changement
-watch(() => themeStore.isDark, (isDark) => {
-  document.documentElement.classList.toggle('dark', isDark);
-}, { immediate: true });
+watch(
+  () => themeStore.isDark,
+  (isDark) => {
+    document.documentElement.classList.toggle("dark", isDark);
+  },
+  { immediate: true }
+);
 </script>
 
 <template>
-  <div id="app" class="min-h-screen bg-gray-50 dark:bg-gray-950 transition-colors duration-200">
+  <div
+    id="app"
+    class="min-h-screen bg-gray-50 dark:bg-gray-950 transition-colors duration-200"
+  >
     <!-- Navigation -->
     <Navbar />
 
@@ -97,16 +104,18 @@ watch(() => themeStore.isDark, (isDark) => {
       v-if="authStore.loading"
       class="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50"
     >
-      <div class="bg-white dark:bg-gray-900 rounded-2xl p-8 flex items-center space-x-4 shadow-2xl border border-gray-200 dark:border-gray-800">
-        <div
-          class="loading-spinner h-8 w-8"
-        ></div>
-        <span class="text-gray-700 dark:text-gray-300 font-medium">Chargement...</span>
+      <div
+        class="bg-white dark:bg-gray-900 rounded-2xl p-8 flex items-center space-x-4 shadow-2xl border border-gray-200 dark:border-gray-800"
+      >
+        <div class="loading-spinner h-8 w-8"></div>
+        <span class="text-gray-700 dark:text-gray-300 font-medium"
+          >Chargement...</span
+        >
       </div>
     </div>
 
     <!-- Indicateur de connexion réseau -->
-    <div
+    <!-- <div
       v-if="!navigator.onLine"
       class="fixed bottom-4 left-4 right-4 bg-red-600 text-white p-4 rounded-xl shadow-lg z-40 text-center"
     >
@@ -114,13 +123,13 @@ watch(() => themeStore.isDark, (isDark) => {
         <div class="w-2 h-2 bg-white rounded-full animate-pulse"></div>
         <span class="font-medium">Connexion internet perdue</span>
       </div>
-    </div>
+    </div> -->
   </div>
 </template>
 
 <style>
 /* Import de la police Inter */
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap");
 
 /* Variables CSS globales */
 :root {
