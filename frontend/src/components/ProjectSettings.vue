@@ -65,36 +65,63 @@ const api = axios.create({
 
 // Méthodes
 const initForm = () => {
-  const envVars = props.project.env_vars
-    ? JSON.parse(props.project.env_vars)
-    : [];
+  // Gestion sécurisée des env_vars
+  let envVars = [];
+  try {
+    if (props.project.env_vars) {
+      // Si c'est déjà un tableau, l'utiliser directement
+      if (Array.isArray(props.project.env_vars)) {
+        envVars = props.project.env_vars;
+      } else if (typeof props.project.env_vars === "string") {
+        // Si c'est une chaîne, essayer de la parser
+        envVars = props.project.env_vars.trim()
+          ? JSON.parse(props.project.env_vars)
+          : [];
+      }
+    }
+  } catch (error) {
+    console.warn("Erreur parsing env_vars:", error);
+    envVars = [];
+  }
 
   Object.assign(form, {
-    name: props.project.name,
-    branch: props.project.branch,
+    name: props.project.name || "",
+    branch: props.project.branch || "main",
     framework: props.project.framework || "",
     build_command: props.project.build_command || "",
     output_dir: props.project.output_dir || "",
     install_command: props.project.install_command || "",
     auto_deploy: props.project.auto_deploy !== false,
     custom_domain: props.project.custom_domain || "",
-    env_vars: envVars.map((env) => ({ ...env, showValue: false })),
+    env_vars: envVars.map((env) => ({
+      key: env.key || "",
+      value: env.value || "",
+      showValue: false,
+    })),
   });
 
   originalForm.value = JSON.parse(JSON.stringify(form));
   loadBranches();
 };
 
+// Aussi, corrige la fonction loadBranches :
 const loadBranches = async () => {
   try {
     loadingBranches.value = true;
     const [owner, repo] = props.project.github_repo.split("/");
-    const branches = await getRepoBranches(owner, repo);
-    availableBranches.value = branches.map((b) => b.name);
 
-    // Ajouter la branche actuelle si elle n'est pas dans la liste
-    if (!availableBranches.value.includes(form.branch)) {
-      availableBranches.value.unshift(form.branch);
+    // Utilise la nouvelle API des branches
+    const response = await api.get(`/projects/${owner}/${repo}/branches`);
+
+    if (response.data.success) {
+      availableBranches.value = response.data.branches.map((b) => b.name);
+
+      // Ajouter la branche actuelle si elle n'est pas dans la liste
+      if (!availableBranches.value.includes(form.branch)) {
+        availableBranches.value.unshift(form.branch);
+      }
+    } else {
+      throw new Error(response.data.error);
     }
   } catch (error) {
     console.error("Erreur chargement branches:", error);
@@ -113,31 +140,42 @@ const detectFramework = async () => {
   try {
     detecting.value = true;
     const [owner, repo] = props.project.github_repo.split("/");
-    const detection = await detectFramework(owner, repo);
 
-    if (detection.framework) {
-      form.framework = detection.framework;
+    // Appel à la nouvelle API de détection
+    const response = await api.post("/projects/detect-framework", {
+      owner,
+      repo,
+    });
 
-      if (detection.buildConfig) {
-        form.build_command =
-          detection.buildConfig.buildCommand || form.build_command;
-        form.output_dir =
-          detection.buildConfig.outputDirectory || form.output_dir;
-        form.install_command =
-          detection.buildConfig.installCommand || form.install_command;
+    if (response.data.success) {
+      const { framework, buildConfig } = response.data;
+
+      if (framework) {
+        form.framework = framework;
+
+        if (buildConfig) {
+          form.build_command = buildConfig.buildCommand || form.build_command;
+          form.output_dir = buildConfig.outputDirectory || form.output_dir;
+          form.install_command =
+            buildConfig.installCommand || form.install_command;
+        }
+
+        notifications.success(`Framework détecté : ${framework}`, {
+          title: "🔍 Détection automatique",
+        });
+      } else {
+        notifications.warning(
+          "Impossible de détecter le framework automatiquement"
+        );
       }
-
-      notifications.success(`Framework détecté : ${detection.framework}`, {
-        title: "🔍 Détection automatique",
-      });
     } else {
-      notifications.warning(
-        "Impossible de détecter le framework automatiquement"
-      );
+      throw new Error(response.data.error);
     }
   } catch (error) {
     console.error("Erreur détection framework:", error);
-    notifications.error("Erreur lors de la détection du framework");
+    notifications.error(
+      error.response?.data?.error || "Erreur lors de la détection du framework"
+    );
   } finally {
     detecting.value = false;
   }
