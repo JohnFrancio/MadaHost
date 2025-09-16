@@ -2,22 +2,549 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Variables CSS pour les thèmes */
+:root {
+  --color-primary-50: #eff6ff;
+  --color-primary-100: #dbeafe;
+  --color-primary-500: #3b82f6;
+  --color-primary-600: #2563eb;
+  --color-primary-700: #1d4ed8;
+  --color-primary-900: #1e3a8a;
+  
+  /* Couleurs sémantiques */
+  --color-success: #10b981;
+  --color-warning: #f59e0b;
+  --color-error: #ef4444;
+  --color-info: #3b82f6;
+  
+  /* Ombres personnalisées */
+  --shadow-soft: 0 2px 15px -3px rgba(0, 0, 0, 0.07), 0 10px 20px -2px rgba(0, 0, 0, 0.04);
+  --shadow-medium: 0 4px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+  --shadow-strong: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+}
+
+/* Mode sombre */
+.dark {
+  --color-primary-50: #1e3a8a;
+  --color-primary-100: #1d4ed8;
+  --color-primary-500: #3b82f6;
+  --color-primary-600: #60a5fa;
+  --color-primary-700: #93c5fd;
+  --color-primary-900: #dbeafe;
+}
+
 @layer base {
+  html {
+    scroll-behavior: smooth;
+  }
+  
   body {
-    @apply bg-gray-50 text-gray-900;
+    @apply bg-gray-50 dark:bg-gray-950 text-gray-900 dark:text-gray-100 transition-colors duration-200;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+  
+  /* Scrollbar personnalisée */
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  
+  ::-webkit-scrollbar-track {
+    @apply bg-gray-100 dark:bg-gray-800;
+  }
+  
+  ::-webkit-scrollbar-thumb {
+    @apply bg-gray-300 dark:bg-gray-600 rounded-full;
+  }
+  
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-gray-400 dark:bg-gray-500;
   }
 }
 
 @layer components {
   .btn-primary {
-    @apply bg-primary-600 hover:bg-primary-700 text-white px-4 py-2 rounded-lg transition-colors;
+    @apply bg-gradient-to-r from-primary-600 to-primary-700 hover:from-primary-700 hover:to-primary-800 text-white px-6 py-3 rounded-xl font-medium transition-all duration-200 shadow-lg hover:shadow-xl transform hover:-translate-y-0.5 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 dark:focus:ring-offset-gray-900;
   }
   
   .btn-secondary {
-    @apply bg-gray-200 hover:bg-gray-300 text-gray-700 px-4 py-2 rounded-lg transition-colors;
+    @apply bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300 px-6 py-3 rounded-xl font-medium transition-all duration-200 border border-gray-200 dark:border-gray-700 shadow-sm hover:shadow-md focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 dark:focus:ring-offset-gray-900;
+  }
+  
+  .btn-ghost {
+    @apply text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-gray-800 px-4 py-2 rounded-lg transition-all duration-200;
+  }
+  
+  .btn-danger {
+    @apply bg-gradient-to-r from-red-600 to-red-700 hover:from-red-700 hover:to-red-800 text-white px-6 py-3 rounded-xl font-medium transition-all duration-200 shadow-lg hover:shadow-xl transform hover:-translate-y-0.5;
   }
   
   .card {
-    @apply bg-white rounded-lg shadow-sm border border-gray-200 p-6;
+    @apply bg-white dark:bg-gray-900 rounded-2xl shadow-soft hover:shadow-medium border border-gray-200 dark:border-gray-800 p-6 transition-all duration-200;
+  }
+  
+  .card-hover {
+    @apply card hover:shadow-strong hover:-translate-y-1 cursor-pointer;
+  }
+  
+  .input-field {
+    @apply w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl focus:ring-2 focus:ring-primary-500 focus:border-transparent bg-white dark:bg-gray-800 text-gray-900 dark:text-white placeholder-gray-500 dark:placeholder-gray-400 transition-all duration-200;
+  }
+  
+  .select-field {
+    @apply input-field appearance-none bg-no-repeat bg-right pr-10;
+    background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3e%3cpath stroke='%236b7280' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='m6 8 4 4 4-4'/%3e%3c/svg%3e");
+  }
+  
+  .status-badge {
+    @apply inline-flex items-center px-3 py-1 rounded-full text-xs font-medium;
+  }
+  
+  .status-success {
+    @apply status-badge bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300;
+  }
+  
+  .status-warning {
+    @apply status-badge bg-yellow-100 dark:bg-yellow-900/30 text-yellow-800 dark:text-yellow-300;
+  }
+  
+  .status-error {
+    @apply status-badge bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-300;
+  }
+  
+  .status-info {
+    @apply status-badge bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-300;
+  }
+  
+  .glass-effect {
+    @apply bg-white/80 dark:bg-gray-900/80 backdrop-blur-xl border border-white/20 dark:border-gray-800/20;
+  }
+  
+  .gradient-text {
+    @apply bg-gradient-to-r from-primary-600 to-primary-800 dark:from-primary-400 dark:to-primary-600 bg-clip-text text-transparent;
+  }
+  
+  .loading-spinner {
+    @apply animate-spin rounded-full border-2 border-gray-200 dark:border-gray-700 border-t-primary-600 dark:border-t-primary-400;
+  }
+}
+
+@layer utilities {
+  .text-balance {
+    text-wrap: balance;
+  }
+  
+  .animation-delay-200 {
+    animation-delay: 200ms;
+  }
+  
+  .animation-delay-400 {
+    animation-delay: 400ms;
+  }
+  
+  .animation-delay-600 {
+    animation-delay: 600ms;
+  }
+}
+
+/* Animations personnalisées */
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(30px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes fadeInScale {
+  from {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes slideInRight {
+  from {
+    opacity: 0;
+    transform: translateX(30px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.animate-fade-in-up {
+  animation: fadeInUp 0.6s ease-out;
+}
+
+.animate-fade-in-scale {
+  animation: fadeInScale 0.4s ease-out;
+}
+
+.animate-slide-in-right {
+  animation: slideInRight 0.5s ease-out;
+}
+
+/* Effets de focus améliorés */
+.focus-ring {
+  @apply focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 dark:focus:ring-offset-gray-900;
+}
+
+/* Transitions fluides pour les éléments interactifs */
+.interactive {
+  @apply transition-all duration-200 ease-out;
+}
+
+.interactive:hover {
+  @apply transform -translate-y-0.5;
+}
+
+/* Styles pour les modals */
+.modal-overlay {
+  @apply fixed inset-0 bg-black/50 backdrop-blur-sm z-40;
+}
+
+.modal-content {
+  @apply bg-white dark:bg-gray-900 rounded-2xl shadow-2xl border border-gray-200 dark:border-gray-800 max-w-4xl w-full mx-4;
+}
+
+/* Amélioration des tooltips */
+[title] {
+  position: relative;
+}
+
+/* Styles pour les notifications */
+.notification-enter-active,
+.notification-leave-active {
+  transition: all 0.3s ease;
+}
+
+.notification-enter-from {
+  opacity: 0;
+  transform: translateX(100%);
+}
+
+.notification-leave-to {
+  opacity: 0;
+  transform: translateX(100%);
+}
+
+/* Amélioration des liens */
+.link-primary {
+  @apply text-primary-600 dark:text-primary-400 hover:text-primary-700 dark:hover:text-primary-300 transition-colors duration-200;
+}
+
+.link-secondary {
+  @apply text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors duration-200;
+}
+
+/* Styles pour les codes */
+.code-block {
+  @apply bg-gray-100 dark:bg-gray-800 text-gray-900 dark:text-gray-100 p-4 rounded-xl font-mono text-sm border border-gray-200 dark:border-gray-700;
+}
+
+.code-inline {
+  @apply bg-gray-100 dark:bg-gray-800 text-gray-900 dark:text-gray-100 px-2 py-1 rounded font-mono text-sm;
+}
+
+/* Amélioration des tables */
+.table-modern {
+  @apply w-full bg-white dark:bg-gray-900 rounded-xl overflow-hidden shadow-soft border border-gray-200 dark:border-gray-800;
+}
+
+.table-modern th {
+  @apply bg-gray-50 dark:bg-gray-800 px-6 py-4 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider;
+}
+
+.table-modern td {
+  @apply px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-gray-100 border-t border-gray-200 dark:border-gray-800;
+}
+
+.table-modern tbody tr:hover {
+  @apply bg-gray-50 dark:bg-gray-800/50;
+}
+
+/* Amélioration des formulaires */
+.form-group {
+  @apply space-y-2;
+}
+
+.form-label {
+  @apply block text-sm font-medium text-gray-700 dark:text-gray-300;
+}
+
+.form-error {
+  @apply text-sm text-red-600 dark:text-red-400 mt-1;
+}
+
+.form-help {
+  @apply text-sm text-gray-500 dark:text-gray-400 mt-1;
+}
+
+/* Styles pour les alertes */
+.alert {
+  @apply p-4 rounded-xl border-l-4;
+}
+
+.alert-success {
+  @apply alert border-green-400 bg-green-50 dark:bg-green-900/20 text-green-800 dark:text-green-300;
+}
+
+.alert-warning {
+  @apply alert border-yellow-400 bg-yellow-50 dark:bg-yellow-900/20 text-yellow-800 dark:text-yellow-300;
+}
+
+.alert-error {
+  @apply alert border-red-400 bg-red-50 dark:bg-red-900/20 text-red-800 dark:text-red-300;
+}
+
+.alert-info {
+  @apply alert border-blue-400 bg-blue-50 dark:bg-blue-900/20 text-blue-800 dark:text-blue-300;
+}
+
+/* Amélioration des badges */
+.badge {
+  @apply inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium;
+}
+
+.badge-primary {
+  @apply badge bg-primary-100 dark:bg-primary-900/30 text-primary-800 dark:text-primary-300;
+}
+
+.badge-success {
+  @apply badge bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300;
+}
+
+.badge-warning {
+  @apply badge bg-yellow-100 dark:bg-yellow-900/30 text-yellow-800 dark:text-yellow-300;
+}
+
+.badge-error {
+  @apply badge bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-300;
+}
+
+/* Effets de survol améliorés */
+.hover-lift {
+  @apply transition-all duration-200 hover:shadow-medium hover:-translate-y-1;
+}
+
+.hover-glow {
+  @apply transition-all duration-200;
+}
+
+.hover-glow:hover {
+  box-shadow: 0 0 20px rgba(59, 130, 246, 0.3);
+}
+
+/* Styles pour les loaders */
+.loader-dots {
+  @apply flex space-x-1;
+}
+
+.loader-dots > div {
+  @apply w-2 h-2 bg-primary-600 dark:bg-primary-400 rounded-full animate-pulse;
+}
+
+.loader-dots > div:nth-child(2) {
+  animation-delay: 0.2s;
+}
+
+.loader-dots > div:nth-child(3) {
+  animation-delay: 0.4s;
+}
+
+/* Amélioration des dividers */
+.divider {
+  @apply border-t border-gray-200 dark:border-gray-800;
+}
+
+.divider-vertical {
+  @apply border-l border-gray-200 dark:border-gray-800;
+}
+
+/* Styles pour les conteneurs de contenu */
+.content-container {
+  @apply max-w-7xl mx-auto px-4 sm:px-6 lg:px-8;
+}
+
+.section-padding {
+  @apply py-12 sm:py-16 lg:py-20;
+}
+
+/* Amélioration des grilles */
+.grid-auto-fit {
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+}
+
+.grid-auto-fill {
+  grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+}
+
+/* Styles pour les états vides */
+.empty-state {
+  @apply text-center py-12 px-4;
+}
+
+.empty-state-icon {
+  @apply w-16 h-16 mx-auto mb-4 text-gray-400 dark:text-gray-600;
+}
+
+.empty-state-title {
+  @apply text-lg font-medium text-gray-900 dark:text-white mb-2;
+}
+
+.empty-state-description {
+  @apply text-gray-600 dark:text-gray-400 mb-6 max-w-md mx-auto;
+}
+
+/* Amélioration des progress bars */
+.progress-bar {
+  @apply w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2 overflow-hidden;
+}
+
+.progress-fill {
+  @apply h-full bg-gradient-to-r from-primary-500 to-primary-600 rounded-full transition-all duration-500 ease-out;
+}
+
+/* Styles pour les tooltips */
+.tooltip {
+  @apply absolute z-50 px-3 py-2 text-sm text-white bg-gray-900 dark:bg-gray-700 rounded-lg shadow-lg opacity-0 pointer-events-none transition-opacity duration-200;
+}
+
+.tooltip.show {
+  @apply opacity-100;
+}
+
+/* Amélioration des dropdowns */
+.dropdown {
+  @apply absolute right-0 mt-2 w-56 bg-white dark:bg-gray-800 rounded-xl shadow-strong border border-gray-200 dark:border-gray-700 z-50 overflow-hidden;
+}
+
+.dropdown-item {
+  @apply block w-full text-left px-4 py-3 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors duration-150;
+}
+
+/* Styles pour les onglets */
+.tab-button {
+  @apply px-4 py-2 text-sm font-medium rounded-lg transition-all duration-200;
+}
+
+.tab-button.active {
+  @apply bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300;
+}
+
+.tab-button:not(.active) {
+  @apply text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-gray-800;
+}
+
+/* Responsive utilities */
+@media (max-width: 640px) {
+  .card {
+    @apply p-4 rounded-xl;
+  }
+  
+  .btn-primary,
+  .btn-secondary {
+    @apply px-4 py-2 text-sm;
+  }
+}
+
+/* Amélioration de l'accessibilité */
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* Focus visible pour l'accessibilité */
+.focus-visible:focus-visible {
+  @apply outline-none ring-2 ring-primary-500 ring-offset-2 dark:ring-offset-gray-900;
+}
+
+/* Styles pour les états de chargement */
+.skeleton {
+  @apply bg-gray-200 dark:bg-gray-700 animate-pulse rounded;
+}
+
+.skeleton-text {
+  @apply skeleton h-4 w-full;
+}
+
+.skeleton-title {
+  @apply skeleton h-6 w-3/4;
+}
+
+.skeleton-avatar {
+  @apply skeleton w-10 h-10 rounded-full;
+}
+
+/* Amélioration des liens */
+a {
+  @apply transition-colors duration-200;
+}
+
+/* Styles pour les métriques/stats */
+.metric-card {
+  @apply bg-gradient-to-br p-6 rounded-2xl text-white shadow-lg hover:shadow-xl transition-all duration-200 hover:-translate-y-1;
+}
+
+.metric-value {
+  @apply text-3xl font-bold mb-1;
+}
+
+.metric-label {
+  @apply text-sm opacity-90;
+}
+
+/* Styles pour les graphiques/charts */
+.chart-container {
+  @apply bg-white dark:bg-gray-900 p-6 rounded-2xl border border-gray-200 dark:border-gray-800 shadow-soft;
+}
+
+/* Amélioration des listes */
+.list-item {
+  @apply flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-800 last:border-b-0 hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors duration-150;
+}
+
+/* Styles pour les étapes/steps */
+.step-indicator {
+  @apply w-8 h-8 rounded-full flex items-center justify-center text-sm font-medium transition-all duration-200;
+}
+
+.step-indicator.active {
+  @apply bg-primary-600 text-white shadow-lg;
+}
+
+.step-indicator.completed {
+  @apply bg-green-600 text-white;
+}
+
+.step-indicator.inactive {
+  @apply bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-400;
+}
+
+/* Styles pour les tags */
+.tag {
+  @apply inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300;
+}
+
+.tag-removable {
+  @apply tag pr-1;
+}
+
+.tag-remove {
+  @apply ml-2 p-0.5 rounded-full hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors;
   }
 }

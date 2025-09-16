@@ -1,24 +1,29 @@
 <script setup>
-import { onMounted } from "vue";
+import { onMounted, watch } from "vue";
 import { RouterView } from "vue-router";
 import { useAuthStore } from "@/stores/auth";
+import { useThemeStore } from "@/stores/theme";
 import { useNotificationsStore } from "@/stores/notifications";
 import Navbar from "@/components/Navbar.vue";
 import NotificationContainer from "@/components/NotificationContainer.vue";
 
 // Stores
 const authStore = useAuthStore();
+const themeStore = useThemeStore();
 const notificationsStore = useNotificationsStore();
 
 // Initialisation de l'app
 onMounted(async () => {
+  // Initialiser le thème
+  themeStore.init();
+  
   try {
     // Vérifier l'état d'authentification
     await authStore.checkAuth();
 
     // Message de bienvenue si connecté
     if (authStore.isAuthenticated) {
-      notificationsStore.info(`Bienvenue ${authStore.user.username} ! 👋`, {
+      notificationsStore.success(`Bienvenue ${authStore.user.username} ! 👋`, {
         title: "🎉 Connexion réussie",
         duration: 3000,
       });
@@ -54,89 +59,73 @@ window.addEventListener("unhandledrejection", (event) => {
   // Empêcher l'affichage de l'erreur dans la console pour les erreurs gérées
   event.preventDefault();
 });
+
+// Appliquer le thème au changement
+watch(() => themeStore.isDark, (isDark) => {
+  document.documentElement.classList.toggle('dark', isDark);
+}, { immediate: true });
 </script>
 
 <template>
-  <div id="app" class="min-h-screen bg-gray-50">
+  <div id="app" class="min-h-screen bg-gray-50 dark:bg-gray-950 transition-colors duration-200">
     <!-- Navigation -->
     <Navbar />
 
     <!-- Contenu principal -->
-    <main class="flex-1 my-10">
-      <RouterView />
+    <main class="flex-1">
+      <div class="content-container section-padding">
+        <transition
+          name="page"
+          enter-active-class="transition duration-300 ease-out"
+          enter-from-class="opacity-0 transform translate-y-4"
+          enter-to-class="opacity-100 transform translate-y-0"
+          leave-active-class="transition duration-200 ease-in"
+          leave-from-class="opacity-100 transform translate-y-0"
+          leave-to-class="opacity-0 transform translate-y-4"
+          mode="out-in"
+        >
+          <RouterView />
+        </transition>
+      </div>
     </main>
 
     <!-- Container des notifications -->
     <NotificationContainer />
 
-    <!-- Loading global optionnel -->
+    <!-- Loading global amélioré -->
     <div
       v-if="authStore.loading"
-      class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
+      class="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50"
     >
-      <div class="bg-white rounded-lg p-6 flex items-center space-x-4">
+      <div class="bg-white dark:bg-gray-900 rounded-2xl p-8 flex items-center space-x-4 shadow-2xl border border-gray-200 dark:border-gray-800">
         <div
-          class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600"
+          class="loading-spinner h-8 w-8"
         ></div>
-        <span class="text-gray-700 font-medium">Chargement...</span>
+        <span class="text-gray-700 dark:text-gray-300 font-medium">Chargement...</span>
+      </div>
+    </div>
+
+    <!-- Indicateur de connexion réseau -->
+    <div
+      v-if="!navigator.onLine"
+      class="fixed bottom-4 left-4 right-4 bg-red-600 text-white p-4 rounded-xl shadow-lg z-40 text-center"
+    >
+      <div class="flex items-center justify-center space-x-2">
+        <div class="w-2 h-2 bg-white rounded-full animate-pulse"></div>
+        <span class="font-medium">Connexion internet perdue</span>
       </div>
     </div>
   </div>
 </template>
 
 <style>
-/* Styles globaux pour l'application */
-#app {
-  font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
-    Oxygen, Ubuntu, Cantarell, sans-serif;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-}
+/* Import de la police Inter */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
 
-/* Scrollbar personnalisée */
-::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
-}
-
-::-webkit-scrollbar-track {
-  background: #f1f5f9;
-  border-radius: 4px;
-}
-
-::-webkit-scrollbar-thumb {
-  background: #cbd5e1;
-  border-radius: 4px;
-}
-
-::-webkit-scrollbar-thumb:hover {
-  background: #94a3b8;
-}
-
-/* Animation globale pour les transitions de page */
-.page-enter-active,
-.page-leave-active {
-  transition: opacity 0.3s ease;
-}
-
-.page-enter-from,
-.page-leave-to {
-  opacity: 0;
-}
-
-/* Classes utilitaires personnalisées */
-.glass-effect {
-  background: rgba(255, 255, 255, 0.95);
-  backdrop-filter: blur(10px);
-  border: 1px solid rgba(255, 255, 255, 0.2);
-}
-
-.loading-spinner {
-  @apply animate-spin rounded-full border-b-2 border-primary-600;
-}
-
-/* Focus personnalisé pour l'accessibilité */
-.focus-ring {
-  @apply focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500;
+/* Variables CSS globales */
+:root {
+  --ease-out-cubic: cubic-bezier(0.33, 1, 0.68, 1);
+  --ease-in-cubic: cubic-bezier(0.32, 0, 0.67, 0);
+  --ease-in-out-cubic: cubic-bezier(0.65, 0, 0.35, 1);
 }
 </style>
