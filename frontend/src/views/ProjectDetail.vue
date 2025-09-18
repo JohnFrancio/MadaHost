@@ -19,6 +19,7 @@ import { LinkIcon } from "@heroicons/vue/24/solid";
 import ProjectSettings from "@/components/ProjectSettings.vue";
 import ProjectSettingsModal from "@/components/ProjectSettingsModal.vue";
 import DeploymentLogsModal from "@/components/DeploymentLogsModal.vue";
+import ProjectPreview from "@/components/ProjectPreview.vue";
 
 // Composables
 const route = useRoute();
@@ -748,7 +749,7 @@ onUnmounted(() => {
                   Statistiques
                 </h3>
 
-                <div class="grid grid-cols-2 gap-4">
+                <div class="grid grid-cols-2 gap-4 mb-6">
                   <div class="bg-green-50 p-4 rounded-lg">
                     <div class="text-2xl font-bold text-green-600">
                       {{ deploymentStats.success }}
@@ -781,21 +782,8 @@ onUnmounted(() => {
                 </div>
               </div>
 
-              <!-- Graphique des déploiements (placeholder) -->
-              <div>
-                <h4 class="text-md font-medium text-gray-900 mb-3">
-                  Déploiements récents
-                </h4>
-                <div
-                  class="h-48 bg-gray-100 rounded-lg flex items-center justify-center"
-                >
-                  <div class="text-gray-500 text-center">
-                    <ChartBarIcon class="w-8 h-8 mx-auto mb-2" />
-                    <p>Graphique des déploiements</p>
-                    <p class="text-sm">(à venir)</p>
-                  </div>
-                </div>
-              </div>
+              <!-- Aperçu du projet déployé -->
+              <ProjectPreview :project="project" />
             </div>
           </div>
         </div>
