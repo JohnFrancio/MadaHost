@@ -193,7 +193,6 @@ router.post("/", requireAuth, async (req, res) => {
       framework,
       auto_deploy = true,
       env_vars = [],
-      custom_domain,
     } = req.body;
 
     if (!name || !github_repo) {
@@ -207,7 +206,7 @@ router.post("/", requireAuth, async (req, res) => {
     const cleanName = name.toLowerCase().replace(/[^a-z0-9]/g, "-");
     const uniqueId = Date.now().toString(36);
     const subdomain = `${cleanName}-${uniqueId}`;
-    const domain = custom_domain || `${subdomain}.madahost.me`;
+    const domain = `${subdomain}.madahost.me`;
 
     // Commandes par défaut selon le framework
     const getDefaultCommands = (detectedFramework) => {
@@ -258,7 +257,6 @@ router.post("/", requireAuth, async (req, res) => {
       output_dir: output_dir || defaultCommands.output_dir,
       install_command: install_command || defaultCommands.install_command,
       domain,
-      custom_domain: custom_domain || null,
       status: "created",
       framework: framework || null,
       auto_deploy,
