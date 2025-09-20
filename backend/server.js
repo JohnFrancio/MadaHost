@@ -94,6 +94,10 @@ app.use("/api/github", githubRoutes);
 const deploymentsRoutes = require("./src/routes/deployments.js");
 app.use("/api/deployments", deploymentsRoutes);
 
+// Routes d'administration
+const adminRoutes = require("./src/routes/admin");
+app.use("/api/admin", adminRoutes);
+
 // Route de santé détaillée
 app.get("/api/health", (req, res) => {
   const health = {

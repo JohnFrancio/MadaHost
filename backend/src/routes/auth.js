@@ -100,11 +100,12 @@ passport.serializeUser((user, done) => {
 });
 
 // ✅ CORRECTION: Désérialisation avec le token GitHub
+// Dans backend/src/routes/auth.js
 passport.deserializeUser(async (id, done) => {
   try {
     const { data: user, error } = await supabase
       .from("users")
-      .select("id, github_id, username, email, avatar_url, access_token") // ✅ Inclure access_token
+      .select("id, github_id, username, email, avatar_url, access_token, role") // Ajouter role
       .eq("id", id)
       .single();
 
@@ -113,7 +114,6 @@ passport.deserializeUser(async (id, done) => {
       return done(error);
     }
 
-    // ✅ Ajouter le token dans l'objet user pour les routes
     if (user) {
       user.githubAccessToken = user.access_token;
     }
@@ -153,6 +153,7 @@ router.get("/me", (req, res) => {
   console.log("🔍 Route /me appelée");
   console.log("👤 User:", req.user ? "présent" : "absent");
   console.log("🔑 Token:", req.user?.access_token ? "présent" : "absent");
+  console.log("🏛️ Role:", req.user?.role); // Ajout du log du rôle
 
   if (!req.user) {
     return res.status(401).json({ error: "Non authentifié" });
@@ -164,6 +165,7 @@ router.get("/me", (req, res) => {
       username: req.user.username,
       email: req.user.email,
       avatar_url: req.user.avatar_url,
+      role: req.user.role || "user", // S'assurer que le rôle est inclus
       hasGithubToken: !!req.user.access_token,
     },
   });
@@ -197,6 +199,27 @@ const requireAuth = (req, res, next) => {
   }
   next();
 };
+
+router.get("/user", requireAuth, (req, res) => {
+  console.log("🔍 Route /user appelée pour vérification admin");
+  console.log("👤 User role:", req.user?.role);
+
+  if (!req.user) {
+    return res.status(401).json({ error: "Non authentifié" });
+  }
+
+  res.json({
+    success: true,
+    user: {
+      id: req.user.id,
+      username: req.user.username,
+      email: req.user.email,
+      avatar_url: req.user.avatar_url,
+      role: req.user.role || "user",
+      github_id: req.user.github_id,
+    },
+  });
+});
 
 // ✅ Middleware pour vérifier le token GitHub
 const requireGithubToken = (req, res, next) => {

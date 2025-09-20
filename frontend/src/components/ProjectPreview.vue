@@ -1,4 +1,4 @@
-<!-- frontend/src/components/ProjectPreview.vue -->
+<!-- frontend/src/components/ProjectPreview.vue - AVEC FIX IFRAME -->
 
 <script setup>
 import { ref, computed, onMounted, nextTick } from "vue";
@@ -7,6 +7,7 @@ import {
   LinkIcon,
   GlobeAltIcon,
   ExclamationCircleIcon,
+  PhotoIcon,
 } from "@heroicons/vue/24/outline";
 
 const props = defineProps({
@@ -21,9 +22,15 @@ const previewLoading = ref(true);
 const previewError = ref(false);
 const refreshing = ref(false);
 const previewFrame = ref(null);
-// URL du site déployé
+const showScreenshot = ref(false);
+const iframeBlocked = ref(false);
+
+// Variable pour le mode développement
+const isDev = import.meta.env.DEV;
+
+// URL du site déployé pour le clic (ouverture dans nouvel onglet)
 const siteUrl = computed(() => {
-  if (import.meta.env.DEV) {
+  if (isDev) {
     // En développement, utiliser le serveur statique local
     return `http://localhost:3002/project/${props.project.id}/`;
   } else {
@@ -32,26 +39,50 @@ const siteUrl = computed(() => {
   }
 });
 
+// URL spéciale pour l'iframe (sans restrictions X-Frame-Options)
+const previewUrl = computed(() => {
+  if (isDev) {
+    // Route spéciale pour l'aperçu sans restrictions iframe
+    return `http://localhost:3002/preview/${props.project.id}/`;
+  } else {
+    // En production, on peut utiliser la même URL ou une route dédiée
+    return `https://preview.${props.project.domain}/`;
+  }
+});
+
 // Méthodes
 const onPreviewLoad = () => {
+  console.log("✅ Aperçu chargé avec succès");
   previewLoading.value = false;
   previewError.value = false;
+  iframeBlocked.value = false;
 };
 
-const onPreviewError = () => {
+const onPreviewError = (event) => {
+  console.error("❌ Erreur chargement iframe:", event);
   previewLoading.value = false;
   previewError.value = true;
+
+  // Détecter si c'est un problème de X-Frame-Options
+  if (event.type === "error" && previewFrame.value) {
+    iframeBlocked.value = true;
+  }
 };
 
 const refreshPreview = async () => {
   refreshing.value = true;
   previewLoading.value = true;
   previewError.value = false;
+  iframeBlocked.value = false;
+  showScreenshot.value = false;
 
   // Attendre un peu pour l'effet visuel
   setTimeout(() => {
     if (previewFrame.value) {
-      previewFrame.value.src = previewFrame.value.src + "?t=" + Date.now();
+      // Ajouter un timestamp pour éviter le cache
+      const url = new URL(previewUrl.value);
+      url.searchParams.set("t", Date.now().toString());
+      previewFrame.value.src = url.toString();
     }
     refreshing.value = false;
   }, 500);
@@ -61,6 +92,12 @@ const openSite = () => {
   if (props.project.status === "active") {
     window.open(siteUrl.value, "_blank");
   }
+};
+
+const tryScreenshot = async () => {
+  showScreenshot.value = true;
+  // Ici, vous pourriez implémenter une logique pour générer des screenshots
+  // Par exemple, via une API comme htmlcsstoimage.com ou screenshot.guru
 };
 
 const getStatusClass = (status) => {
@@ -109,13 +146,27 @@ const formatDate = (dateString) => {
   }
 };
 
+// Détecter si l'iframe est bloquée après quelques secondes
+const checkIframeLoad = () => {
+  if (previewFrame.value && previewLoading.value) {
+    setTimeout(() => {
+      if (previewLoading.value) {
+        console.warn("⚠️ Iframe semble bloquée, basculement vers alternative");
+        iframeBlocked.value = true;
+        previewError.value = true;
+        previewLoading.value = false;
+      }
+    }, 8000); // 8 secondes de timeout
+  }
+};
+
 // Lifecycle
 onMounted(async () => {
   if (props.project.status === "active") {
-    // Démarrer le chargement après un petit délai
     await nextTick();
     setTimeout(() => {
       previewLoading.value = true;
+      checkIframeLoad();
     }, 100);
   } else {
     previewLoading.value = false;
@@ -138,6 +189,16 @@ onMounted(async () => {
         >
           <ArrowPathIcon :class="['w-4 h-4', refreshing && 'animate-spin']" />
         </button>
+
+        <button
+          v-if="iframeBlocked && project.status === 'active'"
+          @click="tryScreenshot"
+          class="text-purple-600 hover:text-purple-800 p-1 rounded"
+          title="Essayer un screenshot"
+        >
+          <PhotoIcon class="w-4 h-4" />
+        </button>
+
         <a
           v-if="project.status === 'active'"
           :href="siteUrl"
@@ -171,7 +232,7 @@ onMounted(async () => {
       >
         <!-- Loading state -->
         <div
-          v-if="previewLoading"
+          v-if="previewLoading && !iframeBlocked"
           class="absolute inset-0 flex items-center justify-center bg-gray-50"
         >
           <div class="text-center">
@@ -182,32 +243,79 @@ onMounted(async () => {
           </div>
         </div>
 
-        <!-- Aperçu iframe (caché pendant le chargement) -->
+        <!-- Aperçu iframe (utilise la route /preview/ spéciale) -->
         <iframe
-          v-show="!previewLoading && !previewError"
+          v-show="!previewLoading && !previewError && !iframeBlocked"
           ref="previewFrame"
-          :src="siteUrl"
+          :src="previewUrl"
           class="w-full h-full border-0 rounded-lg scale-50 origin-top-left transform"
           style="width: 200%; height: 200%"
           @load="onPreviewLoad"
           @error="onPreviewError"
           sandbox="allow-same-origin allow-scripts allow-popups allow-forms"
+          loading="lazy"
         />
 
         <!-- Erreur de chargement -->
         <div
-          v-if="previewError"
+          v-if="previewError && !showScreenshot"
           class="absolute inset-0 flex items-center justify-center bg-red-50"
         >
           <div class="text-center">
             <ExclamationCircleIcon class="w-8 h-8 text-red-500 mx-auto mb-2" />
-            <p class="text-sm text-red-600">Impossible de charger l'aperçu</p>
-            <button
-              @click="refreshPreview"
-              class="text-xs text-red-500 hover:text-red-700 mt-1"
+            <p class="text-sm text-red-600 mb-2">
+              {{
+                iframeBlocked
+                  ? "Aperçu bloqué par sécurité"
+                  : "Impossible de charger l'aperçu"
+              }}
+            </p>
+
+            <div class="space-y-2">
+              <button
+                @click="refreshPreview"
+                class="text-xs text-red-500 hover:text-red-700 block mx-auto"
+              >
+                Réessayer
+              </button>
+
+              <button
+                v-if="iframeBlocked"
+                @click="tryScreenshot"
+                class="text-xs text-purple-500 hover:text-purple-700 block mx-auto"
+              >
+                Essayer un screenshot
+              </button>
+
+              <a
+                :href="siteUrl"
+                target="_blank"
+                class="text-xs text-blue-500 hover:text-blue-700 block mx-auto"
+              >
+                Ouvrir dans un nouvel onglet
+              </a>
+            </div>
+          </div>
+        </div>
+
+        <!-- Alternative screenshot -->
+        <div
+          v-if="showScreenshot"
+          class="absolute inset-0 flex items-center justify-center bg-purple-50"
+        >
+          <div class="text-center">
+            <PhotoIcon class="w-8 h-8 text-purple-500 mx-auto mb-2" />
+            <p class="text-sm text-purple-600 mb-2">Mode screenshot</p>
+            <p class="text-xs text-purple-400">
+              Fonctionnalité en développement
+            </p>
+            <a
+              :href="siteUrl"
+              target="_blank"
+              class="text-xs text-blue-500 hover:text-blue-700 block mx-auto mt-2"
             >
-              Réessayer
-            </button>
+              Ouvrir dans un nouvel onglet
+            </a>
           </div>
         </div>
 
@@ -259,6 +367,16 @@ onMounted(async () => {
           {{ formatDate(project.last_deployed) }}
         </span>
       </div>
+
+      <!-- Debug info en mode dev -->
+      <div v-if="isDev" class="mt-2 p-2 bg-blue-50 rounded text-xs">
+        <p class="text-blue-700">🔧 Debug Mode</p>
+        <p class="text-blue-600">Preview URL: {{ previewUrl }}</p>
+        <p class="text-blue-600">Site URL: {{ siteUrl }}</p>
+        <p v-if="iframeBlocked" class="text-red-600">
+          ⚠️ Iframe bloquée - Vérifiez les headers X-Frame-Options
+        </p>
+      </div>
     </div>
   </div>
 </template>
@@ -274,5 +392,35 @@ iframe::-webkit-scrollbar {
   width: 0;
   height: 0;
   display: none; /* Chrome, Safari, Opera */
+}
+
+/* Animation pour les erreurs */
+.error-bounce {
+  animation: bounce 0.5s ease-in-out;
+}
+
+@keyframes bounce {
+  0%,
+  20%,
+  50%,
+  80%,
+  100% {
+    transform: translateY(0);
+  }
+  40% {
+    transform: translateY(-5px);
+  }
+  60% {
+    transform: translateY(-3px);
+  }
+}
+
+/* Animation de survol pour l'aperçu */
+.preview-container {
+  transition: transform 0.2s ease-in-out;
+}
+
+.preview-container:hover {
+  transform: scale(1.02);
 }
 </style>

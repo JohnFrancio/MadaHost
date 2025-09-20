@@ -315,6 +315,7 @@ router.delete("/:deploymentId", requireAuth, async (req, res) => {
   }
 });
 
+// Remplacer la fonction deployProject dans backend/src/routes/deployments.js
 async function deployProject(deploymentId, project) {
   try {
     console.log(
@@ -327,13 +328,7 @@ async function deployProject(deploymentId, project) {
 
     // Mettre à jour le statut
     buildLog += `🚀 [${new Date().toISOString()}] Démarrage du déploiement...\n`;
-    await supabase
-      .from("deployments")
-      .update({
-        status: "cloning",
-        build_log: buildLog,
-      })
-      .eq("id", deploymentId);
+    await updateDeploymentLog(deploymentId, buildLog);
 
     // Créer les dossiers
     await fs.mkdir(deploymentDir, { recursive: true });
@@ -361,6 +356,11 @@ async function deployProject(deploymentId, project) {
     } https://${user.access_token}@github.com/${
       project.github_repo
     }.git ${deploymentDir}`;
+
+    await supabase
+      .from("deployments")
+      .update({ status: "cloning", build_log: buildLog })
+      .eq("id", deploymentId);
     await execCommand(cloneCommand);
     buildLog += `✅ Repository cloné avec succès\n`;
 
@@ -378,34 +378,62 @@ async function deployProject(deploymentId, project) {
       buildLog += `⚠️ Impossible de récupérer le commit hash\n`;
     }
 
-    // ==================== DÉTECTION ET INSTALLATION AUTOMATIQUE ====================
-
-    buildLog += `🔍 [${new Date().toISOString()}] Détection des frameworks et dépendances...\n`;
+    // ==================== DÉTECTION ET CONFIGURATION AUTOMATIQUE ====================
+    // ==================== DÉTECTION ET CONFIGURATION AUTOMATIQUE ====================
+    buildLog += `🔍 [${new Date().toISOString()}] Détection des frameworks...\n`;
     await updateDeploymentLog(deploymentId, buildLog);
 
     const frameworkHandler = new UniversalFrameworkHandler();
-    const { frameworks, log: detectionLog } =
-      await frameworkHandler.detectFrameworks(deploymentDir);
+
+    // Utiliser la nouvelle méthode detectFrameworks qui retourne configs
+    const {
+      frameworks: detectedFrameworks,
+      configs: frameworkConfigs,
+      log: detectionLog,
+    } = await frameworkHandler.detectFrameworks(deploymentDir);
     buildLog += detectionLog;
 
-    if (frameworks.length === 0) {
-      buildLog += `ℹ️ Aucun framework CSS/JS spécial détecté\n`;
-    } else {
-      buildLog += `🎯 Frameworks détectés: ${frameworks.join(", ")}\n`;
+    let primaryFramework = null;
+    let finalBuildCommand = project.build_command;
+    let finalOutputDir = project.output_dir || "dist";
+    let finalInstallCommand = project.install_command || "npm install";
+
+    if (frameworkConfigs.length > 0) {
+      // Prendre le framework avec la plus haute confidence
+      primaryFramework = frameworkConfigs[0];
+      buildLog += `🎯 Framework principal détecté: ${
+        primaryFramework.name
+      } (${Math.round(primaryFramework.confidence * 100)}%)\n`;
+
+      // Utiliser la configuration automatique si pas de configuration manuelle
+      if (!project.build_command || project.build_command === "npm run build") {
+        finalBuildCommand = primaryFramework.config.buildCommand;
+        buildLog += `🔧 Commande de build automatique: ${finalBuildCommand}\n`;
+      }
+
+      if (!project.output_dir || project.output_dir === "dist") {
+        finalOutputDir = primaryFramework.config.outputDir;
+        buildLog += `📁 Dossier de sortie automatique: ${finalOutputDir}\n`;
+      }
+
+      if (
+        !project.install_command ||
+        project.install_command === "npm install"
+      ) {
+        finalInstallCommand = primaryFramework.config.installCommand;
+      }
     }
 
-    // Configuration et installation des dépendances manquantes
+    // Configuration et installation des dépendances
     const { buildLog: setupLog, missingDeps } =
       await frameworkHandler.setupFrameworks(
         deploymentDir,
-        frameworks,
+        detectedFrameworks,
         buildLog
       );
     buildLog = setupLog;
 
-    // ==================== FIN DÉTECTION ====================
-
-    // Installation des dépendances (avec les nouvelles dépendances)
+    // ==================== INSTALLATION DES DÉPENDANCES ====================
     await supabase
       .from("deployments")
       .update({ status: "building", build_log: buildLog })
@@ -417,169 +445,245 @@ async function deployProject(deploymentId, project) {
 
       buildLog += `📦 [${new Date().toISOString()}] Installation des dépendances...\n`;
       if (missingDeps.length > 0) {
-        buildLog += `🔧 Nouvelles dépendances: ${missingDeps.join(", ")}\n`;
+        buildLog += `🔧 Nouvelles dépendances ajoutées: ${missingDeps.join(
+          ", "
+        )}\n`;
       }
       await updateDeploymentLog(deploymentId, buildLog);
 
-      const installCmd = project.install_command || "npm install";
-      buildLog += `🔧 Commande: ${installCmd}\n`;
-
-      await execCommand(`cd ${deploymentDir} && ${installCmd}`);
-      buildLog += `✅ Dépendances installées\n`;
+      buildLog += `🔧 Commande d'installation: ${finalInstallCommand}\n`;
+      await execCommand(`cd ${deploymentDir} && ${finalInstallCommand}`);
+      buildLog += `✅ Dépendances installées avec succès\n`;
     } catch (error) {
-      buildLog += `⚠️ Pas de package.json ou erreur installation\n`;
+      buildLog += `⚠️ Pas de package.json trouvé ou erreur installation: ${error.message}\n`;
     }
 
-    // Build du projet
-    if (project.build_command) {
+    // ==================== BUILD DU PROJET ====================
+    if (finalBuildCommand && finalBuildCommand !== "") {
       buildLog += `🏗️ [${new Date().toISOString()}] Build du projet...\n`;
-      buildLog += `🔧 Commande: ${project.build_command}\n`;
+      buildLog += `🔧 Commande de build: ${finalBuildCommand}\n`;
       await updateDeploymentLog(deploymentId, buildLog);
 
       try {
-        // Variables d'environnement optimisées
-        const buildEnv = {
+        // Variables d'environnement optimisées selon le framework
+        let buildEnv = {
           NODE_ENV: "production",
-          TAILWIND_MODE: frameworks.includes("tailwind") ? "build" : undefined,
-          VITE_NODE_ENV: "production",
           CI: "true",
+          GENERATE_SOURCEMAP: "false",
         };
 
+        if (primaryFramework) {
+          buildEnv = { ...buildEnv, ...primaryFramework.config.env };
+
+          // Variables spécifiques par framework
+          if (primaryFramework.name === "vue") {
+            buildEnv.VUE_APP_NODE_ENV = "production";
+          } else if (primaryFramework.name === "react") {
+            buildEnv.REACT_APP_NODE_ENV = "production";
+          } else if (primaryFramework.name === "nextjs") {
+            buildEnv.NEXT_TELEMETRY_DISABLED = "1";
+          }
+        }
+
         await execCommand(
-          `cd ${deploymentDir} && ${project.build_command}`,
+          `cd ${deploymentDir} && ${finalBuildCommand}`,
           buildEnv
         );
-        buildLog += `✅ Build réussi\n`;
+        buildLog += `✅ Build réussi avec ${
+          primaryFramework?.name || "configuration par défaut"
+        }\n`;
       } catch (buildError) {
         buildLog += `⚠️ Build échoué: ${buildError.message}\n`;
 
-        // Tentative de build sans minification en cas d'erreur terser
-        if (buildError.message.includes("terser")) {
-          buildLog += `🔄 Tentative build sans minification...\n`;
+        // Stratégies de fallback selon le framework
+        if (
+          primaryFramework?.name === "vue" &&
+          buildError.message.includes("terser")
+        ) {
+          buildLog += `🔄 Tentative build Vue sans minification...\n`;
           try {
-            // Modifier temporairement vite.config.js pour désactiver terser
-            const viteConfigPath = path.join(deploymentDir, "vite.config.js");
-            const noMinifyConfig = `import { defineConfig } from 'vite'
-              import react from '@vitejs/plugin-react'
-
-              export default defineConfig({
-                plugins: [react()],
-                base: './',
-                build: {
-                  minify: false,  // Désactiver la minification
-                  outDir: 'dist',
-                  assetsDir: 'assets'
-                }
-              })`;
-            await fs.writeFile(viteConfigPath, noMinifyConfig);
-
             await execCommand(
-              `cd ${deploymentDir} && ${project.build_command}`
+              `cd ${deploymentDir} && npm run build -- --mode production --minify false`
             );
-            buildLog += `✅ Build réussi sans minification\n`;
-          } catch (e) {
-            buildLog += `❌ Échec build alternatif: ${e.message}\n`;
-            throw buildError; // Rethrow l'erreur originale
+            buildLog += `✅ Build Vue réussi sans minification\n`;
+          } catch (fallbackError) {
+            buildLog += `❌ Fallback Vue échoué: ${fallbackError.message}\n`;
+            throw buildError;
+          }
+        } else if (
+          primaryFramework?.name === "react" &&
+          buildError.message.includes("terser")
+        ) {
+          buildLog += `🔄 Tentative build React avec Vite alternatif...\n`;
+          try {
+            // Créer une config Vite simplifiée
+            const viteConfigPath = path.join(deploymentDir, "vite.config.js");
+            const simpleConfig = `import { defineConfig } from 'vite'
+import react from '@vitejs/plugin-react'
+
+export default defineConfig({
+  plugins: [react()],
+  base: './',
+  build: {
+    outDir: 'build',
+    minify: false,
+    sourcemap: false
+  }
+})`;
+            await fs.writeFile(viteConfigPath, simpleConfig);
+            await execCommand(`cd ${deploymentDir} && npm run build`);
+            buildLog += `✅ Build React réussi avec config simplifiée\n`;
+          } catch (fallbackError) {
+            buildLog += `❌ Fallback React échoué: ${fallbackError.message}\n`;
+            throw buildError;
           }
         } else {
-          throw buildError;
+          // Fallback générique
+          buildLog += `🔄 Tentative build générique sans optimisations...\n`;
+          try {
+            const simpleBuildEnv = { NODE_ENV: "production" };
+            await execCommand(
+              `cd ${deploymentDir} && npm run build`,
+              simpleBuildEnv
+            );
+            buildLog += `✅ Build générique réussi\n`;
+          } catch (genericError) {
+            buildLog += `❌ Tous les builds ont échoué: ${genericError.message}\n`;
+            throw buildError;
+          }
         }
       }
+    } else {
+      buildLog += `ℹ️ Aucune commande de build spécifiée, copie directe des fichiers\n`;
     }
 
-    // Copie des fichiers - logique existante améliorée
+    // ==================== DÉPLOIEMENT DES FICHIERS ====================
     await supabase
       .from("deployments")
       .update({ status: "deploying", build_log: buildLog })
       .eq("id", deploymentId);
 
-    buildLog += `📁 [${new Date().toISOString()}] Copie des fichiers...\n`;
+    buildLog += `📁 [${new Date().toISOString()}] Déploiement des fichiers...\n`;
+    buildLog += `🔍 Recherche du dossier de sortie: ${finalOutputDir}\n`;
     await updateDeploymentLog(deploymentId, buildLog);
 
-    const outputDirectory = project.output_dir || "dist";
-    const sourceDir = path.join(deploymentDir, outputDirectory);
+    const sourceDir = path.join(deploymentDir, finalOutputDir);
 
-    buildLog += `🔍 Vérification dossier source: ${sourceDir}\n`;
+    // Essayer différents emplacements selon le framework
+    const possibleDirs = [
+      sourceDir,
+      path.join(deploymentDir, "build"), // React CRA
+      path.join(deploymentDir, "dist"), // Vue, Vite
+      path.join(deploymentDir, "out"), // Next.js
+      path.join(deploymentDir, "public"), // Fallback
+      deploymentDir, // Dernier recours
+    ];
 
-    try {
-      await fs.access(sourceDir);
-      buildLog += `✅ Dossier ${outputDirectory} trouvé\n`;
-
-      // Debug: lister le contenu du dossier source
-      const sourceContent = await execCommand(`ls -la "${sourceDir}"`);
-      buildLog += `📁 Contenu source:\n${sourceContent}`;
-
-      // Nettoyer et recréer le dossier de destination
-      await execCommand(`rm -rf "${outputDir}"/*`);
-      await execCommand(`mkdir -p "${outputDir}"`);
-
-      // Copier avec preservation des liens symboliques et permissions
-      await execCommand(
-        `cp -r "${sourceDir}/"* "${outputDir}/" 2>/dev/null || true`
-      );
-      buildLog += `✅ Fichiers copiés depuis ${outputDirectory}\n`;
-
-      // Vérifier que les assets ont été copiés
-      const assetsDir = path.join(outputDir, "assets");
-      if (
-        await fs
-          .access(assetsDir)
-          .then(() => true)
-          .catch(() => false)
-      ) {
-        const assetsContent = await execCommand(`ls -la "${assetsDir}"`);
-        buildLog += `📁 Assets copiés:\n${assetsContent}`;
-      }
-    } catch (error) {
-      buildLog += `⚠️ Dossier ${outputDirectory} introuvable, copie alternative...\n`;
-
+    let foundSourceDir = null;
+    for (const dir of possibleDirs) {
       try {
-        // Alternative avec rsync
-        await execCommand(
-          `rsync -av --include="*/" --include="*.html" --include="*.css" --include="*.js" --include="*.png" --include="*.jpg" --include="*.svg" --include="*.ico" --include="*.gif" --include="*.woff*" --include="*.ttf" --exclude="*" "${deploymentDir}/" "${outputDir}/"`
-        );
-        buildLog += `✅ Fichiers statiques copiés avec rsync\n`;
-      } catch (rsyncError) {
-        // Dernière tentative avec find
-        await execCommand(
-          `find "${deploymentDir}" -maxdepth 3 \\( -name "*.html" -o -name "*.css" -o -name "*.js" -o -name "*.png" -o -name "*.jpg" -o -name "*.gif" -o -name "*.svg" -o -name "*.ico" -o -name "*.woff*" -o -name "*.ttf" \\) -exec cp {} "${outputDir}/" \\; 2>/dev/null || true`
-        );
-        buildLog += `✅ Fichiers statiques copiés (méthode basique)\n`;
+        await fs.access(dir);
+        const files = await fs.readdir(dir);
+        if (
+          files.includes("index.html") ||
+          files.some((f) => f.endsWith(".html"))
+        ) {
+          foundSourceDir = dir;
+          buildLog += `✅ Fichiers trouvés dans: ${dir.replace(
+            deploymentDir,
+            "."
+          )}\n`;
+          break;
+        }
+      } catch (error) {
+        continue;
       }
     }
 
-    // Correction des chemins dans index.html
-    const indexPath = path.join(outputDir, "index.html");
+    if (!foundSourceDir) {
+      throw new Error(
+        `Aucun dossier de sortie trouvé. Vérifié: ${possibleDirs
+          .map((d) => d.replace(deploymentDir, "."))
+          .join(", ")}`
+      );
+    }
+
+    // Copier les fichiers
     try {
-      let indexContent = await fs.readFile(indexPath, "utf8");
+      buildLog += `📋 Contenu à copier depuis ${foundSourceDir.replace(
+        deploymentDir,
+        "."
+      )}\n`;
+      const sourceContent = await execCommand(`ls -la "${foundSourceDir}"`);
+      buildLog +=
+        sourceContent.substring(0, 500) +
+        (sourceContent.length > 500 ? "...\n" : "\n");
 
-      buildLog += `🔧 [${new Date().toISOString()}] Correction des chemins dans index.html...\n`;
+      // Nettoyer et copier
+      await execCommand(`rm -rf "${outputDir}"/*`);
+      await execCommand(
+        `cp -r "${foundSourceDir}/"* "${outputDir}/" 2>/dev/null || true`
+      );
+      buildLog += `✅ Fichiers copiés vers le serveur statique\n`;
 
-      // Remplacer les chemins absolus par des chemins relatifs
-      const originalContent = indexContent;
-      indexContent = indexContent
-        .replace(/href="\/assets\//g, 'href="./assets/')
-        .replace(/src="\/assets\//g, 'src="./assets/')
-        .replace(/href="\//g, 'href="./')
-        .replace(/src="\//g, 'src="./');
+      // Vérifier que les fichiers ont été copiés
+      const copiedFiles = await fs.readdir(outputDir);
+      buildLog += `📊 Fichiers copiés: ${copiedFiles.length} éléments\n`;
 
-      if (originalContent !== indexContent) {
-        await fs.writeFile(indexPath, indexContent);
-        buildLog += `✅ Chemins corrigés dans index.html\n`;
+      if (copiedFiles.includes("index.html")) {
+        buildLog += `✅ index.html trouvé dans les fichiers copiés\n`;
       } else {
-        buildLog += `ℹ️ Chemins déjà corrects dans index.html\n`;
+        buildLog += `⚠️ Pas d'index.html trouvé, cherche d'autres fichiers HTML...\n`;
+        const htmlFiles = copiedFiles.filter((f) => f.endsWith(".html"));
+        if (htmlFiles.length > 0) {
+          buildLog += `📄 Fichiers HTML trouvés: ${htmlFiles.join(", ")}\n`;
+        }
       }
-
-      // Vérifier les références CSS/JS
-      const cssMatches = indexContent.match(/href="[^"]*\.css"/g) || [];
-      const jsMatches = indexContent.match(/src="[^"]*\.js"/g) || [];
-
-      buildLog += `🎨 Références CSS: ${cssMatches.length}, JS: ${jsMatches.length}\n`;
-    } catch (indexFixError) {
-      buildLog += `⚠️ Impossible de corriger index.html: ${indexFixError.message}\n`;
+    } catch (copyError) {
+      buildLog += `❌ Erreur lors de la copie: ${copyError.message}\n`;
+      throw copyError;
     }
 
-    // Configuration domaine
+    // Correction des chemins dans les fichiers HTML
+    try {
+      const htmlFiles = await fs.readdir(outputDir);
+      const indexFiles = htmlFiles.filter((f) => f.endsWith(".html"));
+
+      for (const htmlFile of indexFiles) {
+        const htmlPath = path.join(outputDir, htmlFile);
+        let htmlContent = await fs.readFile(htmlPath, "utf8");
+        const originalContent = htmlContent;
+
+        // Corrections des chemins selon le framework
+        if (primaryFramework?.name === "vue") {
+          // Vue utilise souvent /assets/
+          htmlContent = htmlContent
+            .replace(/href="\/assets\//g, 'href="./assets/')
+            .replace(/src="\/assets\//g, 'src="./assets/');
+        } else if (primaryFramework?.name === "react") {
+          // React CRA utilise /static/
+          htmlContent = htmlContent
+            .replace(/href="\/static\//g, 'href="./static/')
+            .replace(/src="\/static\//g, 'src="./static/')
+            .replace(/href="\/assets\//g, 'href="./assets/')
+            .replace(/src="\/assets\//g, 'src="./assets/');
+        }
+
+        // Corrections génériques
+        htmlContent = htmlContent
+          .replace(/href="\//g, 'href="./')
+          .replace(/src="\//g, 'src="./');
+
+        if (originalContent !== htmlContent) {
+          await fs.writeFile(htmlPath, htmlContent);
+          buildLog += `🔧 Chemins corrigés dans ${htmlFile}\n`;
+        }
+      }
+    } catch (fixError) {
+      buildLog += `⚠️ Impossible de corriger les chemins HTML: ${fixError.message}\n`;
+    }
+
+    // Configuration du domaine
     await supabase
       .from("deployments")
       .update({ status: "configuring", build_log: buildLog })
@@ -600,16 +704,19 @@ async function deployProject(deploymentId, project) {
 
     // Vérification finale
     try {
-      const finalStructure = await execCommand(
-        `find "${outputDir}" -type f | head -10`
+      const finalCheck = await execCommand(
+        `find "${outputDir}" -name "*.html" -o -name "*.css" -o -name "*.js" | wc -l`
       );
-      buildLog += `📊 Structure finale (10 premiers fichiers):\n${finalStructure}`;
+      buildLog += `📊 Vérification finale: ${finalCheck.trim()} fichiers web trouvés\n`;
     } catch (e) {
-      buildLog += `⚠️ Impossible de lister la structure finale\n`;
+      buildLog += `⚠️ Impossible de faire la vérification finale\n`;
     }
 
     buildLog += `✅ [${new Date().toISOString()}] Déploiement réussi!\n`;
     buildLog += `🌐 Site disponible: http://localhost:3002/project/${project.id}/\n`;
+    if (primaryFramework) {
+      buildLog += `🎯 Framework déployé: ${primaryFramework.name}\n`;
+    }
 
     // Succès final
     await supabase
@@ -636,6 +743,16 @@ async function deployProject(deploymentId, project) {
     let finalLog = buildLog || "";
     finalLog += `❌ [${new Date().toISOString()}] Erreur: ${error.message}\n`;
 
+    // Informations de debug en cas d'erreur
+    if (primaryFramework) {
+      finalLog += `🔍 Framework détecté: ${primaryFramework.name}\n`;
+      finalLog += `🔍 Config utilisée: ${JSON.stringify(
+        primaryFramework.config,
+        null,
+        2
+      )}\n`;
+    }
+
     await supabase
       .from("deployments")
       .update({
@@ -647,9 +764,7 @@ async function deployProject(deploymentId, project) {
 
     // Nettoyer en cas d'erreur
     try {
-      await execCommand(
-        `rm -rf ${path.join(__dirname, "../../temp", deploymentId)}`
-      );
+      await execCommand(`rm -rf ${deploymentDir}`);
     } catch (cleanupError) {
       console.error("❌ Erreur nettoyage:", cleanupError);
     }

@@ -9,11 +9,62 @@ import {
   ArrowRightOnRectangleIcon,
   Cog6ToothIcon,
 } from "@heroicons/vue/24/outline";
-import { ref } from "vue";
+import { ref, onMounted, computed, watch } from "vue";
 
 const authStore = useAuthStore();
 const themeStore = useThemeStore();
 const mobileMenuOpen = ref(false);
+
+// État local pour l'admin
+const isAdmin = ref(false);
+const checkingAdmin = ref(false);
+
+// Fonction pour vérifier le statut admin
+const checkAdminStatus = async () => {
+  if (!authStore.isAuthenticated) {
+    isAdmin.value = false;
+    return;
+  }
+
+  try {
+    checkingAdmin.value = true;
+    // Import dynamique du store admin
+    const { useAdminStore } = await import("@/stores/admin");
+    const adminStore = useAdminStore();
+
+    const hasAccess = await adminStore.checkAdminStatus();
+    isAdmin.value = hasAccess;
+
+    console.log("Admin status checked:", hasAccess);
+  } catch (error) {
+    console.error("Erreur vérification admin:", error);
+    isAdmin.value = false;
+  } finally {
+    checkingAdmin.value = false;
+  }
+};
+
+// Watch pour réagir aux changements d'authentification
+watch(
+  () => authStore.isAuthenticated,
+  (newVal) => {
+    if (newVal) {
+      // Utilisateur connecté, vérifier le statut admin
+      checkAdminStatus();
+    } else {
+      // Utilisateur déconnecté, reset admin
+      isAdmin.value = false;
+    }
+  },
+  { immediate: true }
+);
+
+onMounted(() => {
+  // Vérification initiale si déjà connecté
+  if (authStore.isAuthenticated) {
+    checkAdminStatus();
+  }
+});
 </script>
 
 <template>
@@ -52,6 +103,23 @@ const mobileMenuOpen = ref(false);
                 class="absolute inset-x-0 bottom-0 h-0.5 bg-primary-600 scale-x-0 group-hover:scale-x-100 transition-transform origin-left"
               ></div>
             </router-link>
+
+            <!-- Lien admin avec vérification directe -->
+            <router-link
+              v-if="isAdmin"
+              to="/admin"
+              class="text-gray-600 dark:text-gray-300 hover:text-primary-600 dark:hover:text-primary-400 px-3 py-2 rounded-lg text-sm font-medium transition-colors relative group"
+            >
+              Administration
+              <div
+                class="absolute inset-x-0 bottom-0 h-0.5 bg-primary-600 scale-x-0 group-hover:scale-x-100 transition-transform origin-left"
+              ></div>
+            </router-link>
+
+            <!-- Debug info (à supprimer en production) -->
+            <div v-if="checkingAdmin" class="text-xs text-gray-400">
+              Vérification admin...
+            </div>
           </template>
         </div>
 
@@ -80,7 +148,7 @@ const mobileMenuOpen = ref(false);
                     {{ authStore.user?.username }}
                   </div>
                   <div class="text-xs text-gray-500 dark:text-gray-400">
-                    Développeur
+                    {{ isAdmin ? "Administrateur" : "Développeur" }}
                   </div>
                 </div>
               </div>
@@ -146,7 +214,7 @@ const mobileMenuOpen = ref(false);
                     {{ authStore.user?.username }}
                   </div>
                   <div class="text-sm text-gray-500 dark:text-gray-400">
-                    Développeur
+                    {{ isAdmin ? "Administrateur" : "Développeur" }}
                   </div>
                 </div>
               </div>
@@ -158,6 +226,16 @@ const mobileMenuOpen = ref(false);
                 class="block px-3 py-2 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors"
               >
                 Dashboard
+              </router-link>
+
+              <!-- Lien admin mobile -->
+              <router-link
+                v-if="isAdmin"
+                to="/admin"
+                @click="mobileMenuOpen = false"
+                class="block px-3 py-2 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors"
+              >
+                Administration
               </router-link>
 
               <!-- Déconnexion mobile -->
@@ -185,41 +263,3 @@ const mobileMenuOpen = ref(false);
     </div>
   </nav>
 </template>
-
-<style scoped>
-/* Effet de survol pour les liens de navigation */
-.nav-link {
-  position: relative;
-  overflow: hidden;
-}
-
-.nav-link::before {
-  content: "";
-  position: absolute;
-  bottom: 0;
-  left: 0;
-  width: 0;
-  height: 2px;
-  background: linear-gradient(90deg, #3b82f6, #1d4ed8);
-  transition: width 0.3s ease;
-}
-
-.nav-link:hover::before {
-  width: 100%;
-}
-
-/* Animation pour le logo */
-@keyframes float {
-  0%,
-  100% {
-    transform: translateY(0px);
-  }
-  50% {
-    transform: translateY(-2px);
-  }
-}
-
-.logo-float:hover {
-  animation: float 2s ease-in-out infinite;
-}
-</style>

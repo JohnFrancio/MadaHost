@@ -43,15 +43,138 @@ class UniversalFrameworkHandler {
         buildCommands: [],
         detection: ["gsap", "TweenMax", "TimelineMax"],
       },
+      vue: {
+        dependencies: ["vue", "@vitejs/plugin-vue", "vite", "terser"],
+        configFiles: ["vite.config.js"],
+        buildCommands: ["npm run build"],
+        detection: ["vue", ".vue", "createApp", "Vue.createApp"],
+        config: {
+          buildCommand: "npm run build",
+          outputDir: "dist",
+          installCommand: "npm install",
+          requiredDeps: ["vue", "vite", "@vitejs/plugin-vue", "terser"],
+          env: { NODE_ENV: "production" },
+        },
+      },
+
+      react: {
+        dependencies: [
+          "react",
+          "react-dom",
+          "@vitejs/plugin-react",
+          "vite",
+          "terser",
+        ],
+        configFiles: ["vite.config.js"],
+        buildCommands: ["npm run build"],
+        detection: ["react", "react-dom", "jsx", "React.", "import React"],
+        config: {
+          buildCommand: "npm run build",
+          outputDir: "build",
+          installCommand: "npm install",
+          requiredDeps: [
+            "react",
+            "react-dom",
+            "vite",
+            "@vitejs/plugin-react",
+            "terser",
+          ],
+          env: { NODE_ENV: "production" },
+        },
+      },
+
+      nextjs: {
+        dependencies: ["next", "react", "react-dom"],
+        configFiles: ["next.config.js"],
+        buildCommands: ["npm run build", "npm run export"],
+        detection: ["next", "Next.js", "import next"],
+        config: {
+          buildCommand: "npm run build && npm run export",
+          outputDir: "out",
+          installCommand: "npm install",
+          requiredDeps: ["next", "react", "react-dom"],
+          env: { NODE_ENV: "production", NEXT_TELEMETRY_DISABLED: "1" },
+        },
+      },
+
+      nuxt: {
+        dependencies: ["nuxt"],
+        configFiles: ["nuxt.config.js", "nuxt.config.ts"],
+        buildCommands: ["npm run build", "npm run generate"],
+        detection: ["nuxt", "Nuxt", "defineNuxtConfig"],
+        config: {
+          buildCommand: "npm run generate",
+          outputDir: "dist",
+          installCommand: "npm install",
+          requiredDeps: ["nuxt"],
+          env: { NODE_ENV: "production" },
+        },
+      },
+
+      angular: {
+        dependencies: ["@angular/core", "@angular/cli"],
+        configFiles: ["angular.json"],
+        buildCommands: ["npm run build"],
+        detection: ["@angular", "ng build", "angular.json"],
+        config: {
+          buildCommand: "npm run build",
+          outputDir: "dist",
+          installCommand: "npm install",
+          requiredDeps: ["@angular/core", "@angular/cli"],
+          env: { NODE_ENV: "production" },
+        },
+      },
+
+      svelte: {
+        dependencies: ["svelte", "@sveltejs/kit", "vite"],
+        configFiles: ["vite.config.js", "svelte.config.js"],
+        buildCommands: ["npm run build"],
+        detection: ["svelte", ".svelte", "SvelteKit"],
+        config: {
+          buildCommand: "npm run build",
+          outputDir: "build",
+          installCommand: "npm install",
+          requiredDeps: ["svelte", "@sveltejs/kit", "vite"],
+          env: { NODE_ENV: "production" },
+        },
+      },
     };
   }
 
   async detectFrameworks(projectPath, buildLog = "") {
     const detectedFrameworks = new Set();
+    const frameworkConfigs = [];
 
     try {
-      // 1. Vérifier package.json
+      // 1. Vérifier package.json pour JS frameworks ET CSS frameworks
       const packageJsonPath = path.join(projectPath, "package.json");
+
+      if (allDeps["next"] && allDeps["react"]) {
+        // Vérifier aussi la présence de scripts Next.js typiques
+        const scripts = packageJson.scripts || {};
+        if (
+          scripts.build &&
+          (scripts.build.includes("next") ||
+            scripts.export ||
+            scripts.start?.includes("next"))
+        ) {
+          detectedFrameworks.add("nextjs");
+          frameworkConfigs.push({
+            name: "nextjs",
+            config: this.supportedFrameworks.nextjs.config,
+            confidence: 0.9,
+          });
+        }
+      } else if (allDeps["vite"] && allDeps["react"]) {
+        // C'est probablement React + Vite
+        detectedFrameworks.add("react");
+        frameworkConfigs.push({
+          name: "react",
+          config: this.supportedFrameworks.react.config,
+          confidence: 0.9,
+        });
+      }
+
       if (await this.fileExists(packageJsonPath)) {
         const packageJson = JSON.parse(
           await fs.readFile(packageJsonPath, "utf8")
@@ -61,23 +184,51 @@ class UniversalFrameworkHandler {
           ...packageJson.devDependencies,
         };
 
-        for (const [framework, config] of Object.entries(
-          this.supportedFrameworks
-        )) {
-          if (config.dependencies.some((dep) => allDeps[dep])) {
+        // Détecter les frameworks JS avec priorité
+        const jsFrameworkPriority = ["nextjs", "vue", "react"];
+        for (const framework of jsFrameworkPriority) {
+          const config = this.supportedFrameworks[framework];
+          if (config && config.dependencies.some((dep) => allDeps[dep])) {
             detectedFrameworks.add(framework);
-            buildLog += `📦 ${framework} détecté dans package.json\n`;
+            frameworkConfigs.push({
+              name: framework,
+              config: config.config,
+              confidence: 0.9,
+            });
+            buildLog += `🎯 Framework JS principal détecté: ${framework}\n`;
+            break; // Un seul framework JS principal
+          }
+        }
+
+        // Détecter les frameworks CSS séparément
+        const cssFrameworks = [
+          "tailwind",
+          "bootstrap",
+          "bulma",
+          "aos",
+          "framerMotion",
+          "gsap",
+        ];
+        for (const framework of cssFrameworks) {
+          const config = this.supportedFrameworks[framework];
+          if (config && config.dependencies.some((dep) => allDeps[dep])) {
+            detectedFrameworks.add(framework);
+            buildLog += `🎨 Framework CSS/Animation détecté: ${framework}\n`;
           }
         }
       }
 
-      // 2. Scanner les fichiers source pour détecter l'utilisation
+      // 2. Scanner les fichiers source
       await this.scanSourceFiles(projectPath, detectedFrameworks, buildLog);
 
-      return { frameworks: Array.from(detectedFrameworks), log: buildLog };
+      return {
+        frameworks: Array.from(detectedFrameworks),
+        configs: frameworkConfigs,
+        log: buildLog,
+      };
     } catch (error) {
       buildLog += `⚠️ Erreur détection frameworks: ${error.message}\n`;
-      return { frameworks: [], log: buildLog };
+      return { frameworks: [], configs: [], log: buildLog };
     }
   }
 
@@ -210,11 +361,23 @@ class UniversalFrameworkHandler {
     const missingDeps = [];
 
     // Vérifier si c'est un projet Vite et ajouter terser automatiquement
+    if (frameworks.includes("vue") && !allDeps.vue) {
+      missingDeps.push("vue", "@vitejs/plugin-vue", "vite");
+    }
+
+    // Gestion spéciale pour React
+    if (frameworks.includes("react") && !allDeps.react) {
+      missingDeps.push("react", "react-dom", "@vitejs/plugin-react", "vite");
+    }
+
+    // IMPORTANT: Terser pour Vite (toujours nécessaire)
     const isViteProject =
-      allDeps.vite || packageJson.scripts?.build?.includes("vite");
+      frameworks.includes("vue") ||
+      frameworks.includes("react") ||
+      allDeps.vite;
     if (isViteProject && !allDeps.terser) {
       missingDeps.push("terser");
-      buildLog += `🔧 Terser manquant pour projet Vite - ajout automatique\n`;
+      buildLog += `🔧 Terser ajouté automatiquement pour projet Vite\n`;
     }
 
     // Ajouter les dépendances des frameworks détectés
@@ -248,6 +411,12 @@ class UniversalFrameworkHandler {
         bootstrap: "^5.3.0",
         bulma: "^0.9.4",
         terser: "^5.19.0", // CRUCIAL pour Vite
+        vue: "^3.3.4",
+        "@vitejs/plugin-vue": "^4.4.0",
+        react: "^18.2.0",
+        "react-dom": "^18.2.0",
+        "@vitejs/plugin-react": "^4.1.0",
+        vite: "^4.4.9",
       };
 
       for (const dep of missingDeps) {
@@ -268,7 +437,7 @@ class UniversalFrameworkHandler {
     }
 
     // Vite Config pour tous les frameworks - VERSION CORRIGÉE
-    buildLog = await this.createUniversalViteConfig(
+    buildLog = await this.createSmartViteConfig(
       projectPath,
       frameworks,
       buildLog
@@ -341,58 +510,58 @@ export default {
     }
 
     const config = `import { defineConfig } from 'vite'
-import react from '@vitejs/plugin-react'
+      import react from '@vitejs/plugin-react'
 
-export default defineConfig({
-  plugins: [
-    react(${
-      frameworkPlugins.length > 0
-        ? `{
-      babel: {
-        plugins: [${frameworkPlugins.join(", ")}]
-      }
-    }`
-        : ""
-    })
-  ],
-  base: './',
-  build: {
-    assetsDir: 'assets',
-    outDir: 'dist',
-    sourcemap: false,
-    minify: 'terser',
-    cssMinify: true,
-    rollupOptions: {
-      output: {
-        manualChunks: undefined,
-        assetFileNames: 'assets/[name]-[hash].[ext]',
-        chunkFileNames: 'assets/[name]-[hash].js',
-        entryFileNames: 'assets/[name]-[hash].js'
-      }
-    }
-  }${
-    Object.keys(cssPreprocessorOptions).length > 0
-      ? `,
-  css: {
-    preprocessorOptions: {
-      ${Object.entries(cssPreprocessorOptions)
-        .map(([key, value]) => `${key}: { ${value} }`)
-        .join(",\n      ")}
-    }
-  }`
-      : ""
-  }${
+      export default defineConfig({
+        plugins: [
+          react(${
+            frameworkPlugins.length > 0
+              ? `{
+            babel: {
+              plugins: [${frameworkPlugins.join(", ")}]
+            }
+          }`
+              : ""
+          })
+        ],
+        base: './',
+        build: {
+          assetsDir: 'assets',
+          outDir: 'dist',
+          sourcemap: false,
+          minify: 'terser',
+          cssMinify: true,
+          rollupOptions: {
+            output: {
+              manualChunks: undefined,
+              assetFileNames: 'assets/[name]-[hash].[ext]',
+              chunkFileNames: 'assets/[name]-[hash].js',
+              entryFileNames: 'assets/[name]-[hash].js'
+            }
+          }
+        }${
+          Object.keys(cssPreprocessorOptions).length > 0
+            ? `,
+        css: {
+          preprocessorOptions: {
+            ${Object.entries(cssPreprocessorOptions)
+              .map(([key, value]) => `${key}: { ${value} }`)
+              .join(",\n      ")}
+          }
+        }`
+            : ""
+        }${
       optimizeDepsIncludes.length > 0
         ? `,
-  optimizeDeps: {
-    include: [${optimizeDepsIncludes.join(", ")}]
-  }`
+        optimizeDeps: {
+          include: [${optimizeDepsIncludes.join(", ")}]
+        }`
         : ""
     },
-  server: {
-    hmr: false
-  }
-})`;
+        server: {
+          hmr: false
+        }
+      })`;
 
     await fs.writeFile(configPath, config);
     buildLog += `⚙️ vite.config.js universel créé avec frameworks: ${frameworks.join(
@@ -400,6 +569,196 @@ export default defineConfig({
     )}\n`;
 
     return buildLog;
+  }
+  // backend/src/utils/universalFrameworkHandler.js - CORRECTION DÉTECTION FRAMEWORKS
+
+  // AJOUTER cette méthode dans votre classe UniversalFrameworkHandler existante
+
+  async detectFrameworks(projectPath, buildLog = "") {
+    const detectedFrameworks = new Set();
+    const frameworkConfigs = [];
+
+    try {
+      buildLog += `🔍 Analyse du projet...\n`;
+
+      // 1. Vérifier package.json pour JS frameworks ET CSS frameworks
+      const packageJsonPath = path.join(projectPath, "package.json");
+      if (await this.fileExists(packageJsonPath)) {
+        const packageJson = JSON.parse(
+          await fs.readFile(packageJsonPath, "utf8")
+        );
+        const allDeps = {
+          ...packageJson.dependencies,
+          ...packageJson.devDependencies,
+        };
+
+        buildLog += `📦 Analyse des dépendances package.json...\n`;
+
+        // Détecter les frameworks JS avec priorité et config
+        const jsFrameworkPriority = [
+          "nextjs",
+          "nuxt",
+          "angular",
+          "vue",
+          "react",
+          "svelte",
+        ];
+
+        for (const framework of jsFrameworkPriority) {
+          const config = this.supportedFrameworks[framework];
+          if (config && config.config) {
+            // Frameworks avec configuration complète
+            if (config.dependencies.some((dep) => allDeps[dep])) {
+              detectedFrameworks.add(framework);
+              frameworkConfigs.push({
+                name: framework,
+                config: config.config,
+                confidence: 0.9,
+              });
+              buildLog += `🎯 Framework JS principal détecté: ${framework}\n`;
+              break; // Un seul framework JS principal
+            }
+          }
+        }
+
+        // Détecter les frameworks CSS séparément
+        const cssFrameworks = [
+          "tailwind",
+          "bootstrap",
+          "bulma",
+          "aos",
+          "framerMotion",
+          "gsap",
+        ];
+        for (const framework of cssFrameworks) {
+          const config = this.supportedFrameworks[framework];
+          if (config && config.dependencies.some((dep) => allDeps[dep])) {
+            detectedFrameworks.add(framework);
+            buildLog += `🎨 Framework CSS/Animation détecté: ${framework}\n`;
+          }
+        }
+      }
+
+      // 2. Scanner les fichiers source pour détection supplémentaire
+      await this.scanSourceFiles(projectPath, detectedFrameworks, buildLog);
+
+      // 3. Si aucun framework JS détecté, essayer de détecter via les scripts npm
+      if (frameworkConfigs.length === 0) {
+        const packageJsonPath = path.join(projectPath, "package.json");
+        if (await this.fileExists(packageJsonPath)) {
+          const packageJson = JSON.parse(
+            await fs.readFile(packageJsonPath, "utf8")
+          );
+          const scripts = packageJson.scripts || {};
+
+          if (scripts.build && scripts.build.includes("vue")) {
+            frameworkConfigs.push({
+              name: "vue",
+              config: this.supportedFrameworks.vue.config,
+              confidence: 0.7,
+            });
+            buildLog += `🔍 Vue.js détecté via scripts npm\n`;
+          } else if (scripts.build && scripts.build.includes("react")) {
+            frameworkConfigs.push({
+              name: "react",
+              config: this.supportedFrameworks.react.config,
+              confidence: 0.7,
+            });
+            buildLog += `🔍 React détecté via scripts npm\n`;
+          }
+        }
+      }
+
+      return {
+        frameworks: Array.from(detectedFrameworks),
+        configs: frameworkConfigs.sort((a, b) => b.confidence - a.confidence),
+        log: buildLog,
+      };
+    } catch (error) {
+      buildLog += `⚠️ Erreur détection frameworks: ${error.message}\n`;
+      return {
+        frameworks: [],
+        configs: [],
+        log: buildLog,
+      };
+    }
+  }
+
+  // MODIFIER aussi votre méthode createSmartViteConfig existante pour gérer les erreurs
+  async createSmartViteConfig(projectPath, frameworks, buildLog) {
+    const configPath = path.join(projectPath, "vite.config.js");
+
+    try {
+      // Déterminer le framework principal
+      let mainFramework = null;
+      let pluginImports = [];
+      let plugins = [];
+
+      if (frameworks.includes("vue")) {
+        mainFramework = "vue";
+        pluginImports.push("import vue from '@vitejs/plugin-vue'");
+        plugins.push("vue()");
+      } else if (frameworks.includes("react")) {
+        mainFramework = "react";
+        pluginImports.push("import react from '@vitejs/plugin-react'");
+        plugins.push("react()");
+      }
+
+      // Configuration de base selon le framework
+      let outputDir = "dist";
+      if (mainFramework === "react") {
+        outputDir = "build";
+      }
+
+      const config = `import { defineConfig } from 'vite'
+${pluginImports.join("\n")}
+
+export default defineConfig({
+  plugins: [${plugins.join(", ")}],
+  base: './',
+  build: {
+    outDir: '${outputDir}',
+    assetsDir: 'assets',
+    sourcemap: false,
+    minify: 'terser',
+    rollupOptions: {
+      output: {
+        manualChunks: undefined,
+        assetFileNames: 'assets/[name]-[hash].[ext]',
+        chunkFileNames: 'assets/[name]-[hash].js',
+        entryFileNames: 'assets/[name]-[hash].js'
+      }
+    },
+    // Options de fallback en cas de problème avec terser
+    terserOptions: {
+      compress: {
+        drop_console: true,
+        drop_debugger: true,
+      },
+      mangle: true,
+    }
+  },
+  server: {
+    port: 3000,
+    hmr: true
+  },
+  optimizeDeps: {
+    include: [${frameworks.includes("aos") ? '"aos"' : ""}${
+        frameworks.includes("gsap") ? ', "gsap"' : ""
+      }${frameworks.includes("framerMotion") ? ', "framer-motion"' : ""}]
+  }
+})`;
+
+      await fs.writeFile(configPath, config);
+      buildLog += `⚙️ Configuration Vite optimisée créée pour ${
+        mainFramework || "générique"
+      }\n`;
+
+      return buildLog;
+    } catch (error) {
+      buildLog += `⚠️ Erreur création config Vite: ${error.message}\n`;
+      return buildLog;
+    }
   }
 
   async setupSpecialBuilds(projectPath, frameworks, buildLog) {

@@ -1,4 +1,4 @@
-// backend/src/services/staticServer.js - VERSION AMÉLIORÉE
+// backend/src/services/staticServer.js - VERSION AVEC FIX IFRAME
 const express = require("express");
 const path = require("path");
 const fs = require("fs").promises;
@@ -19,6 +19,36 @@ class StaticServer {
       res.header("Access-Control-Allow-Origin", "*");
       res.header("Access-Control-Allow-Methods", "GET, OPTIONS");
       res.header("Access-Control-Allow-Headers", "Content-Type");
+      next();
+    });
+
+    // Middleware pour configurer les headers de frame selon l'origine
+    this.app.use((req, res, next) => {
+      const origin = req.get("origin") || req.get("referer");
+
+      console.log(`🔍 Requête depuis origine: ${origin}`);
+
+      // Autoriser les iframes depuis localhost pour le développement
+      if (
+        origin &&
+        (origin.includes("localhost:5173") || // Vue.js dev server
+          origin.includes("localhost:3001") || // API backend
+          origin.includes("localhost:3000") || // Autres serveurs de dev
+          origin.includes("127.0.0.1")) // IP locale
+      ) {
+        console.log(`✅ Autorisation iframe depuis: ${origin}`);
+        res.set("X-Frame-Options", "ALLOWALL");
+        res.set(
+          "Content-Security-Policy",
+          "frame-ancestors 'self' localhost:* 127.0.0.1:*"
+        );
+      } else {
+        console.log(
+          `🔒 Restriction iframe pour: ${origin || "origine inconnue"}`
+        );
+        res.set("X-Frame-Options", "SAMEORIGIN");
+      }
+
       next();
     });
 
@@ -64,6 +94,20 @@ class StaticServer {
         timestamp: new Date().toISOString(),
         port: this.port,
       });
+    });
+
+    // Route spéciale pour les aperçus (iframe-friendly)
+    this.app.get("/preview/:projectId/*?", async (req, res) => {
+      const { projectId } = req.params;
+      const filePath = req.params[0] || "index.html";
+
+      console.log(`🖼️ Aperçu demandé pour: ${projectId}/${filePath}`);
+
+      // Headers spéciaux pour l'aperçu
+      res.set("X-Frame-Options", "ALLOWALL");
+      res.set("Content-Security-Policy", "frame-ancestors *");
+
+      await this.serveProjectFile(projectId, filePath, res);
     });
 
     // Route pour servir les projets par ID avec support des sous-dossiers
@@ -141,10 +185,9 @@ class StaticServer {
             // Headers corrects selon le type de fichier
             const ext = path.extname(location).toLowerCase();
 
-            // Headers de sécurité et cache
             res.set("X-Content-Type-Options", "nosniff");
-            res.set("X-Frame-Options", "SAMEORIGIN");
 
+            // Headers de cache modérés pour éviter les problèmes
             if (
               [
                 ".js",
@@ -159,7 +202,7 @@ class StaticServer {
                 ".ico",
               ].includes(ext)
             ) {
-              res.set("Cache-Control", "public, max-age=86400"); // 24h au lieu d'1 an pour éviter les problèmes de cache
+              res.set("Cache-Control", "public, max-age=3600"); // 1 heure seulement
             }
 
             // MIME types corrects avec encodage
@@ -184,17 +227,6 @@ class StaticServer {
               res.set("Content-Type", mimeTypes[ext]);
             }
 
-            // Headers spéciaux pour CSS et JS
-            if (ext === ".css") {
-              res.set("Content-Type", "text/css; charset=utf-8");
-              res.set("Cache-Control", "public, max-age=3600"); // Cache plus court pour CSS
-            }
-
-            if (ext === ".js") {
-              res.set("Content-Type", "application/javascript; charset=utf-8");
-              res.set("Cache-Control", "public, max-age=3600"); // Cache plus court pour JS
-            }
-
             return res.sendFile(location);
           }
         } catch (err) {
@@ -206,54 +238,6 @@ class StaticServer {
       console.log(
         `❌ Fichier non trouvé dans tous les emplacements: ${filePath}`
       );
-
-      // Debug: Lister les fichiers disponibles
-      try {
-        console.log(`🔍 Debug pour ${projectId}:`);
-
-        const projectFiles = await fs.readdir(projectDir);
-        console.log(
-          `📁 Racine (${projectFiles.length} fichiers):`,
-          projectFiles.slice(0, 5)
-        );
-
-        // Vérifier le dossier assets
-        const assetsDir = path.join(projectDir, "assets");
-        try {
-          const assetsFiles = await fs.readdir(assetsDir);
-          console.log(
-            `📁 Assets (${assetsFiles.length} fichiers):`,
-            assetsFiles.slice(0, 5)
-          );
-        } catch (e) {
-          console.log(`📁 Pas de dossier assets/`);
-        }
-
-        // Vérifier le dossier dist
-        const distDir = path.join(projectDir, "dist");
-        try {
-          const distFiles = await fs.readdir(distDir);
-          console.log(
-            `📁 Dist (${distFiles.length} fichiers):`,
-            distFiles.slice(0, 5)
-          );
-
-          const distAssetsDir = path.join(distDir, "assets");
-          try {
-            const distAssetsFiles = await fs.readdir(distAssetsDir);
-            console.log(
-              `📁 Dist/Assets (${distAssetsFiles.length} fichiers):`,
-              distAssetsFiles.slice(0, 5)
-            );
-          } catch (e) {
-            console.log(`📁 Pas de dossier dist/assets/`);
-          }
-        } catch (e) {
-          console.log(`📁 Pas de dossier dist/`);
-        }
-      } catch (debugError) {
-        console.log(`❌ Debug impossible: ${debugError.message}`);
-      }
 
       // Fallback vers index.html pour les SPA
       const indexLocations = [
@@ -267,6 +251,7 @@ class StaticServer {
           console.log(
             `🔄 Fallback SPA vers: ${indexPath.replace(this.publicDir, "")}`
           );
+
           return res.sendFile(indexPath);
         } catch (e) {
           continue;
@@ -358,16 +343,12 @@ class StaticServer {
           h1 { margin: 0 0 1rem; font-size: 2.5rem; }
           p { margin: 0 0 1rem; opacity: 0.9; }
           .subdomain { font-family: monospace; background: rgba(255,255,255,0.2); padding: 0.5rem; border-radius: 0.5rem; }
-          a { color: #fff; text-decoration: underline; }
         </style>
       </head>
       <body>
         <div class="container">
           <h1>🚀 Site non trouvé</h1>
           <p>Le sous-domaine <span class="subdomain">${subdomain}</span> ne correspond à aucun projet déployé.</p>
-          <p>Vérifiez l'URL ou <a href="http://localhost:5173/dashboard">créez un nouveau projet</a>.</p>
-          <hr style="margin: 2rem 0; border: 1px solid rgba(255,255,255,0.3);">
-          <p style="font-size: 0.9rem; opacity: 0.7;">Powered by MadaHost</p>
         </div>
       </body>
       </html>
@@ -411,11 +392,7 @@ class StaticServer {
       <body>
         <div class="container">
           <h1>🏗️ Site en construction</h1>
-          <p>Le projet <span class="project-id">${projectId}</span> n'a pas encore été déployé ou ne contient pas de fichiers.</p>
-          <p>Le déploiement peut prendre quelques minutes après la création du projet.</p>
-          <p><a href="http://localhost:5173/project/${projectId}" style="color: #fff;">Retour au dashboard</a></p>
-          <hr style="margin: 2rem 0; border: 1px solid rgba(255,255,255,0.3);">
-          <p style="font-size: 0.9rem; opacity: 0.7;">Powered by MadaHost</p>
+          <p>Le projet <span class="project-id">${projectId}</span> n'a pas encore été déployé.</p>
         </div>
       </body>
       </html>
@@ -432,7 +409,10 @@ class StaticServer {
         );
         console.log(`📡 Health check: http://localhost:${this.port}/health`);
         console.log(
-          `🔗 Projets accessibles via /project/:id/ ou sous-domaines`
+          `🖼️ Aperçus: http://localhost:${this.port}/preview/:projectId`
+        );
+        console.log(
+          `🔗 Projets: http://localhost:${this.port}/project/:projectId`
         );
         resolve(this.server);
       });

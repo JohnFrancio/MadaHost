@@ -25,6 +25,10 @@ export const useAuthStore = defineStore("auth", {
         const response = await api.get("/auth/me");
         this.user = response.data.user;
         this.isAuthenticated = true;
+
+        console.log("User data from auth:", response.data.user);
+
+        // Ne pas charger le store admin ici, laisser le router s'en occuper
       } catch (error) {
         this.user = null;
         this.isAuthenticated = false;
