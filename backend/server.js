@@ -8,11 +8,13 @@ const passport = require("passport");
 require("dotenv").config();
 const StaticServer = require("./src/services/staticServer");
 const staticServer = new StaticServer();
+const http = require("http");
+const WebSocketManager = require("./src/services/websocket");
 
 const app = express();
 const PORT = process.env.PORT || 3001;
 
-// Configuration CORS améliorée
+// Configuration CORS améliorée AVEC WebSocket
 const corsOptions = {
   origin: process.env.FRONTEND_URL || "http://localhost:5173",
   credentials: true,
@@ -21,7 +23,7 @@ const corsOptions = {
   allowedHeaders: ["Content-Type", "Authorization", "Cookie"],
 };
 
-// Middlewares de sécurité
+// Middlewares de sécurité MODIFIÉS pour WebSocket
 app.use(
   helmet({
     contentSecurityPolicy: {
@@ -36,10 +38,16 @@ app.use(
           "*.github.com",
           "*.githubusercontent.com",
         ],
-        connectSrc: ["'self'", "https://api.github.com"],
+        // AJOUT IMPORTANT: autoriser les connexions WebSocket
+        connectSrc: [
+          "'self'",
+          "https://api.github.com",
+          "ws://localhost:3001",
+          "wss://localhost:3001",
+        ],
       },
     },
-    crossOriginEmbedderPolicy: false, // Nécessaire pour les images GitHub
+    crossOriginEmbedderPolicy: false,
   })
 );
 
@@ -55,12 +63,12 @@ app.use(
     resave: false,
     saveUninitialized: false,
     cookie: {
-      secure: process.env.NODE_ENV === "production", // HTTPS en production
+      secure: process.env.NODE_ENV === "production",
       httpOnly: true,
       maxAge: 24 * 60 * 60 * 1000, // 24 heures
-      sameSite: process.env.NODE_ENV === "production" ? "none" : "lax", // Pour les cookies cross-origin
+      sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
     },
-    name: "madahost.sid", // Nom personnalisé pour la session
+    name: "madahost.sid",
   })
 );
 
@@ -71,32 +79,46 @@ app.use(passport.session());
 // Middleware de logging des sessions (développement)
 if (process.env.NODE_ENV !== "production") {
   app.use((req, res, next) => {
-    console.log(`[${new Date().toISOString()}] ${req.method} ${req.path}`);
-    console.log("Session ID:", req.sessionID);
-    console.log("User:", req.user ? req.user.username : "non connecté");
-    console.log("---");
+    // Éviter de logger les requêtes WebSocket dans les routes HTTP
+    if (req.path !== "/ws") {
+      console.log(`[${new Date().toISOString()}] ${req.method} ${req.path}`);
+      console.log("Session ID:", req.sessionID);
+      console.log("User:", req.user ? req.user.username : "non connecté");
+      console.log("---");
+    }
     next();
   });
 }
 
-// ✅ IMPORTANT: Utiliser le router d'authentification corrigé
+// Routes API
 const { router: authRouter } = require("./src/routes/auth");
 app.use("/api/auth", authRouter);
 
-// Routes des projets
 app.use("/api/projects", require("./src/routes/projects"));
 
-// ✅ Route GitHub corrigée
 const githubRoutes = require("./src/routes/github");
 app.use("/api/github", githubRoutes);
 
-// Routes des déploiements
 const deploymentsRoutes = require("./src/routes/deployments.js");
 app.use("/api/deployments", deploymentsRoutes);
 
-// Routes d'administration
 const adminRoutes = require("./src/routes/admin");
 app.use("/api/admin", adminRoutes);
+
+const messageRoutes = require("./src/routes/messages");
+app.use("/api/messages", messageRoutes);
+
+// AJOUT: Route de diagnostic WebSocket
+app.get("/api/ws-status", (req, res) => {
+  const stats = WebSocketManager.getStats();
+  res.json({
+    status: "WebSocket server active",
+    connectedUsers: stats.connectedUsers,
+    totalConnections: stats.totalConnections,
+    activeConnections: stats.activeConnections,
+    timestamp: new Date().toISOString(),
+  });
+});
 
 // Route de santé détaillée
 app.get("/api/health", (req, res) => {
@@ -111,6 +133,7 @@ app.get("/api/health", (req, res) => {
       user: req.user ? req.user.username : null,
       sessionId: req.sessionID,
     },
+    websocket: WebSocketManager.getStats(),
     config: {
       github: {
         clientId: !!process.env.GITHUB_CLIENT_ID,
@@ -154,6 +177,7 @@ app.get("/api/user", (req, res) => {
       email: req.user.email,
       avatar: req.user.avatar_url,
       githubId: req.user.github_id,
+      role: req.user.role, // AJOUT IMPORTANT: inclure le rôle
     },
     session: {
       id: req.sessionID,
@@ -166,6 +190,7 @@ app.get("/api/user", (req, res) => {
 
   console.log("✅ Réponse user:", {
     username: response.user.username,
+    role: response.user.role,
     hasToken: response.session.hasGithubToken,
   });
 
@@ -187,6 +212,7 @@ app.get("/api/debug/session", (req, res) => {
       cookie: req.session.cookie,
     },
     user: req.user || null,
+    websocket: WebSocketManager.getStats(),
     headers: {
       userAgent: req.headers["user-agent"],
       origin: req.headers.origin,
@@ -195,6 +221,13 @@ app.get("/api/debug/session", (req, res) => {
     },
   });
 });
+
+// IMPORTANT: Créer le serveur HTTP AVANT de définir les middlewares de fin
+const server = http.createServer(app);
+
+// CRITIQUE: Initialiser WebSocket AVANT server.listen()
+console.log("🔧 Initialisation du serveur WebSocket...");
+WebSocketManager.initialize(server);
 
 // Middleware de gestion d'erreurs global amélioré
 app.use((err, req, res, next) => {
@@ -238,7 +271,10 @@ app.use((err, req, res, next) => {
 
 // Middleware pour les routes non trouvées
 app.use("*", (req, res) => {
-  console.log(`🔍 Route non trouvée: ${req.method} ${req.originalUrl}`);
+  // Ne pas logger les tentatives WebSocket comme des 404
+  if (!req.originalUrl.includes("/ws")) {
+    console.log(`🔍 Route non trouvée: ${req.method} ${req.originalUrl}`);
+  }
   res.status(404).json({
     success: false,
     error: "Route non trouvée",
@@ -248,9 +284,10 @@ app.use("*", (req, res) => {
 });
 
 // Démarrage du serveur avec vérifications
-app.listen(PORT, async () => {
+server.listen(PORT, async () => {
   console.log("🚀 Serveur MadaHost démarré !");
   console.log(`🔗 API disponible sur: http://localhost:${PORT}`);
+  console.log(`🌐 WebSocket disponible sur: ws://localhost:${PORT}/ws`);
   console.log(
     `🌐 Frontend sur: ${process.env.FRONTEND_URL || "http://localhost:5173"}`
   );
@@ -289,11 +326,14 @@ app.listen(PORT, async () => {
   console.log("🎯 Routes disponibles:");
   console.log("  - GET  /api/health");
   console.log("  - GET  /api/user");
+  console.log("  - GET  /api/ws-status");
+  console.log("  - WS   /ws (WebSocket)");
   console.log("  - GET  /api/auth/github");
   console.log("  - GET  /api/auth/me");
   console.log("  - GET  /api/github/repos");
   console.log("  - GET  /api/github/test");
   console.log("  - GET  /api/projects");
+  console.log("  - GET  /api/messages/*");
   console.log("");
   console.log("📡 Serveur statique:");
   console.log(
@@ -305,6 +345,14 @@ app.listen(PORT, async () => {
     `  - GET  http://projet.localhost:${process.env.STATIC_PORT || 3002}/`
   );
   console.log("");
+
+  // Afficher les statistiques WebSocket
+  const wsStats = WebSocketManager.getStats();
+  console.log("📊 WebSocket Status:");
+  console.log(`  - Connexions actives: ${wsStats.activeConnections}`);
+  console.log(`  - Utilisateurs connectés: ${wsStats.connectedUsers}`);
+  console.log("");
+
   console.log("✅ Serveur prêt à recevoir les requêtes");
 
   // Test de connectivité Supabase
@@ -331,25 +379,38 @@ app.listen(PORT, async () => {
   }
 });
 
-// Arrêt propre des deux serveurs
-const gracefulShutdown = () => {
+// CORRECTION: Fonctions de shutdown améliorées
+const gracefulShutdown = async () => {
   console.log("\n🛑 Arrêt des serveurs...");
-  staticServer.stop();
-  process.exit(0);
+
+  try {
+    // Fermer WebSocket proprement
+    if (WebSocketManager) {
+      WebSocketManager.close();
+    }
+
+    // Fermer le serveur statique
+    staticServer.stop();
+
+    // Fermer le serveur HTTP
+    server.close((err) => {
+      if (err) {
+        console.error("❌ Erreur fermeture serveur:", err);
+        process.exit(1);
+      } else {
+        console.log("✅ Serveur fermé proprement");
+        process.exit(0);
+      }
+    });
+  } catch (error) {
+    console.error("❌ Erreur lors de l'arrêt:", error);
+    process.exit(1);
+  }
 };
 
 // Gestion propre de l'arrêt du serveur
-process.on("SIGINT", () => {
-  gracefulShutdown;
-  console.log("\n🛑 Arrêt du serveur demandé");
-  process.exit(0);
-});
-
-process.on("SIGTERM", () => {
-  gracefulShutdown;
-  console.log("\n🛑 Arrêt du serveur (SIGTERM)");
-  process.exit(0);
-});
+process.on("SIGINT", gracefulShutdown);
+process.on("SIGTERM", gracefulShutdown);
 
 process.on("uncaughtException", (err) => {
   console.error("💥 Exception non gérée:", err);
@@ -359,4 +420,5 @@ process.on("uncaughtException", (err) => {
 process.on("unhandledRejection", (reason, promise) => {
   console.error("💥 Promise rejetée non gérée:", reason);
   console.error("Promise:", promise);
+  process.exit(1);
 });

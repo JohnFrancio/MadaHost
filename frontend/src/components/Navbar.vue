@@ -10,6 +10,14 @@ import {
   Cog6ToothIcon,
 } from "@heroicons/vue/24/outline";
 import { ref, onMounted, computed, watch } from "vue";
+// Ajoutez ceci dans la section <script setup> de votre Navbar.vue
+import { useRealtimeStore } from "@/stores/realtime";
+
+// Ajoutez cette ligne avec vos autres imports de stores
+const realtimeStore = useRealtimeStore();
+
+// Ajoutez cette computed property
+const unreadMessagesCount = computed(() => realtimeStore.unreadMessagesCount);
 
 const authStore = useAuthStore();
 const themeStore = useThemeStore();
@@ -115,11 +123,22 @@ onMounted(() => {
                 class="absolute inset-x-0 bottom-0 h-0.5 bg-primary-600 scale-x-0 group-hover:scale-x-100 transition-transform origin-left"
               ></div>
             </router-link>
-
-            <!-- Debug info (à supprimer en production) -->
-            <div v-if="checkingAdmin" class="text-xs text-gray-400">
-              Vérification admin...
-            </div>
+            <router-link
+              to="/messages"
+              class="text-gray-600 dark:text-gray-300 hover:text-primary-600 dark:hover:text-primary-400 px-3 py-2 rounded-lg text-sm font-medium transition-colors relative group"
+            >
+              Support
+              <div
+                class="absolute inset-x-0 bottom-0 h-0.5 bg-primary-600 scale-x-0 group-hover:scale-x-100 transition-transform origin-left"
+              ></div>
+              <!-- Badge de notifications non lues (optionnel) -->
+              <span
+                v-if="unreadMessagesCount > 0"
+                class="absolute -top-1 -right-1 bg-red-500 text-white text-xs rounded-full h-5 w-5 flex items-center justify-center"
+              >
+                {{ unreadMessagesCount > 99 ? "99+" : unreadMessagesCount }}
+              </span>
+            </router-link>
           </template>
         </div>
 
@@ -226,6 +245,19 @@ onMounted(() => {
                 class="block px-3 py-2 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors"
               >
                 Dashboard
+              </router-link>
+              <router-link
+                to="/messages"
+                class="text-gray-600 dark:text-gray-300 hover:text-primary-600 dark:hover:text-primary-400 px-3 py-2 rounded-lg text-sm font-medium transition-colors relative group"
+              >
+                Support
+                <!-- Badge de notifications non lues (optionnel) -->
+                <span
+                  v-if="unreadMessagesCount > 0"
+                  class="absolute -top-1 -right-1 bg-red-500 text-white text-xs rounded-full h-5 w-5 flex items-center justify-center"
+                >
+                  {{ unreadMessagesCount > 99 ? "99+" : unreadMessagesCount }}
+                </span>
               </router-link>
 
               <!-- Lien admin mobile -->

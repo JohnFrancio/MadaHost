@@ -916,6 +916,40 @@ router.get("/logs", requireAuth, requireAdmin, async (req, res) => {
   }
 });
 
+// Route pour récupérer la liste des administrateurs
+router.get("/admins", requireAuth, requireAdmin, async (req, res) => {
+  try {
+    console.log(`👑 Récupération liste des admins par ${req.user.username}`);
+
+    const { data: admins, error } = await supabase
+      .from("users")
+      .select("id, username, avatar_url, created_at")
+      .eq("role", "admin")
+      .order("username", { ascending: true });
+
+    if (error) {
+      console.error("❌ Erreur récupération admins:", error);
+      return res.status(500).json({
+        success: false,
+        error: "Erreur lors de la récupération des administrateurs",
+      });
+    }
+
+    await logAdminAction(req.user.id, "view_admins", "users", null, {
+      count: admins?.length || 0,
+    });
+
+    res.json({
+      success: true,
+      admins: admins || [],
+      count: admins?.length || 0,
+    });
+  } catch (error) {
+    console.error("❌ Erreur serveur:", error);
+    res.status(500).json({ success: false, error: "Erreur serveur" });
+  }
+});
+
 // Recherche globale
 router.get("/search", requireAuth, requireAdmin, async (req, res) => {
   try {
