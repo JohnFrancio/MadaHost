@@ -1,4 +1,54 @@
 // backend/src/routes/deployments.js - CORRIGÉ FINAL
+// Ajoutez ces annotations au début du fichier backend/src/routes/deployments.js
+
+/**
+ * @swagger
+ * tags:
+ *   name: Deployments
+ *   description: Gestion des déploiements de projets
+ */
+
+/**
+ * @swagger
+ * /deployments/projects/{projectId}:
+ *   get:
+ *     summary: Obtenir les déploiements d'un projet
+ *     tags: [Deployments]
+ *     security:
+ *       - sessionAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: projectId
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: ID du projet
+ *       - in: query
+ *         name: page
+ *         schema:
+ *           type: integer
+ *           default: 1
+ *         description: Page de résultats
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           default: 20
+ *         description: Nombre de résultats par page
+ *     responses:
+ *       200:
+ *         description: Liste des déploiements
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 deployments:
+ *                   type: array
+ *
+ */
 const express = require("express");
 const UniversalFrameworkHandler = require("../utils/universalFrameworkHandler");
 const router = express.Router();

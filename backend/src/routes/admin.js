@@ -1,3 +1,871 @@
+// Ajoutez ces annotations au début du fichier backend/src/routes/admin.js
+
+/**
+ * @swagger
+ * tags:
+ *   name: Admin
+ *   description: Routes d'administration (accès admin requis)
+ */
+
+/**
+ * @swagger
+ * /admin/dashboard:
+ *   get:
+ *     summary: Tableau de bord administrateur
+ *     tags: [Admin]
+ *     security:
+ *       - sessionAuth: []
+ *     responses:
+ *       200:
+ *         description: Statistiques complètes du dashboard
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 stats:
+ *                   $ref: '#/components/schemas/AdminStats'
+ *                 recentDeployments:
+ *                   type: array
+ *                   items:
+ *                     allOf:
+ *                       - $ref: '#/components/schemas/Deployment'
+ *                       - type: object
+ *                         properties:
+ *                           projects:
+ *                             type: object
+ *                             properties:
+ *                               name:
+ *                                 type: string
+ *                               users:
+                                 type: object
+                                 properties:
+                                   username:
+                                     type: string
+                                   avatar_url:
+                                     type: string
+                 recentUsers:
+                   type: array
+                   items:
+                     $ref: '#/components/schemas/User'
+                 activeProjects:
+                   type: array
+                   items:
+                     allOf:
+                       - $ref: '#/components/schemas/Project'
+                       - type: object
+                         properties:
+                           users:
+                             type: object
+                             properties:
+                               username:
+                                 type: string
+                               avatar_url:
+                                 type: string
+       403:
+         description: Accès admin requis
+       500:
+         description: Erreur serveur
+
+/**
+ * @swagger
+ * /admin/users:
+ *   get:
+ *     summary: Gestion des utilisateurs avec filtres avancés
+ *     tags: [Admin]
+ *     security:
+ *       - sessionAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: page
+ *         schema:
+ *           type: integer
+ *           default: 1
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           default: 20
+ *       - in: query
+ *         name: search
+ *         schema:
+ *           type: string
+ *         description: Recherche par nom d'utilisateur ou email
+ *       - in: query
+ *         name: role
+ *         schema:
+ *           type: string
+ *           enum: [all, user, admin]
+ *         description: Filtrer par rôle
+ *       - in: query
+ *         name: sortBy
+ *         schema:
+ *           type: string
+ *           enum: [created_at, updated_at, username, role]
+ *           default: created_at
+ *       - in: query
+ *         name: sortOrder
+ *         schema:
+ *           type: string
+ *           enum: [asc, desc]
+ *           default: desc
+ *       - in: query
+ *         name: dateRange
+ *         schema:
+ *           type: string
+ *           enum: [all, 1d, 7d, 30d]
+ *           default: all
+ *     responses:
+ *       200:
+ *         description: Liste des utilisateurs avec pagination
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 users:
+ *                   type: array
+ *                   items:
+ *                     allOf:
+ *                       - $ref: '#/components/schemas/User'
+ *                       - type: object
+ *                         properties:
+ *                           projects:
+ *                             type: object
+ *                             properties:
+ *                               count:
+ *                                 type: number
+ *                 pagination:
+ *                   type: object
+ *                   properties:
+ *                     page:
+ *                       type: integer
+ *                     limit:
+ *                       type: integer
+ *                     total:
+ *                       type: integer
+ *                     totalPages:
+ *                       type: integer
+       403:
+         description: Accès admin requis
+       500:
+         description: Erreur serveur
+
+/**
+ * @swagger
+ * /admin/users/{userId}/role:
+ *   patch:
+ *     summary: Promouvoir/Rétrograder un utilisateur
+ *     tags: [Admin]
+ *     security:
+ *       - sessionAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: userId
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: ID de l'utilisateur
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - role
+ *             properties:
+ *               role:
+ *                 type: string
+ *                 enum: [user, admin]
+ *     responses:
+ *       200:
+ *         description: Rôle modifié avec succès
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 message:
+ *                   type: string
+ *                 user:
+ *                   $ref: '#/components/schemas/User'
+ *       400:
+ *         description: Rôle invalide ou auto-modification interdite
+ *       404:
+ *         description: Utilisateur non trouvé
+ *       403:
+ *         description: Accès admin requis
+ *       500:
+ *         description: Erreur serveur
+
+/**
+ * @swagger
+ * /admin/users/{userId}/status:
+ *   patch:
+ *     summary: Suspendre/Activer un utilisateur
+ *     tags: [Admin]
+ *     security:
+ *       - sessionAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: userId
+ *         required: true
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - status
+ *             properties:
+ *               status:
+ *                 type: string
+ *                 enum: [active, suspended]
+ *     responses:
+ *       200:
+ *         description: Statut modifié avec succès
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Success'
+ *       400:
+ *         description: Statut invalide ou auto-suspension interdite
+ *       404:
+ *         description: Utilisateur non trouvé
+ *       403:
+ *         description: Accès admin requis
+ *       500:
+ *         description: Erreur serveur
+
+/**
+ * @swagger
+ * /admin/users/{userId}:
+ *   delete:
+ *     summary: Supprimer un utilisateur
+ *     tags: [Admin]
+ *     security:
+ *       - sessionAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: userId
+ *         required: true
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               reason:
+ *                 type: string
+ *                 description: Raison de la suppression
+ *     responses:
+ *       200:
+ *         description: Utilisateur supprimé avec succès
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Success'
+ *       400:
+ *         description: Auto-suppression interdite
+ *       404:
+ *         description: Utilisateur non trouvé
+ *       403:
+ *         description: Accès admin requis
+ *       500:
+ *         description: Erreur serveur
+
+/**
+ * @swagger
+ * /admin/projects:
+ *   get:
+ *     summary: Gestion des projets (vue admin)
+ *     tags: [Admin]
+ *     security:
+ *       - sessionAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: page
+ *         schema:
+ *           type: integer
+ *           default: 1
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           default: 20
+ *       - in: query
+ *         name: search
+ *         schema:
+ *           type: string
+ *         description: Recherche par nom, repo ou domaine
+ *       - in: query
+ *         name: status
+ *         schema:
+ *           type: string
+ *           enum: [all, active, inactive, building, error]
+ *       - in: query
+ *         name: framework
+ *         schema:
+ *           type: string
+ *       - in: query
+ *         name: owner
+ *         schema:
+ *           type: string
+ *         description: ID du propriétaire
+ *       - in: query
+ *         name: sortBy
+ *         schema:
+ *           type: string
+ *           enum: [created_at, updated_at, name, status, last_deployed]
+ *           default: created_at
+ *       - in: query
+ *         name: sortOrder
+ *         schema:
+ *           type: string
+ *           enum: [asc, desc]
+ *           default: desc
+ *     responses:
+ *       200:
+ *         description: Liste des projets avec statistiques
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 projects:
+ *                   type: array
+ *                   items:
+ *                     allOf:
+ *                       - $ref: '#/components/schemas/Project'
+ *                       - type: object
+ *                         properties:
+ *                           users:
+ *                             type: object
+ *                             properties:
+ *                               username:
+ *                                 type: string
+ *                               avatar_url:
+ *                                 type: string
+ *                               email:
+ *                                 type: string
+ *                           deployments:
+ *                             type: object
+ *                             properties:
+ *                               total:
+ *                                 type: number
+ *                               successful:
+ *                                 type: number
+ *                               failed:
+ *                                 type: number
+ *                               successRate:
+ *                                 type: number
+ *                 pagination:
+ *                   type: object
+ *                   properties:
+ *                     page:
+ *                       type: integer
+ *                     limit:
+ *                       type: integer
+ *                     total:
+ *                       type: integer
+ *                     totalPages:
+ *                       type: integer
+       403:
+         description: Accès admin requis
+       500:
+         description: Erreur serveur
+
+/**
+ * @swagger
+ * /admin/projects/{projectId}/status:
+ *   patch:
+ *     summary: Modifier le statut d'un projet
+ *     tags: [Admin]
+ *     security:
+ *       - sessionAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: projectId
+ *         required: true
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - status
+ *             properties:
+ *               status:
+ *                 type: string
+ *                 enum: [active, inactive, building, error]
+ *     responses:
+ *       200:
+ *         description: Statut modifié avec succès
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 message:
+ *                   type: string
+ *                 project:
+ *                   $ref: '#/components/schemas/Project'
+ *       400:
+ *         description: Statut invalide
+ *       403:
+ *         description: Accès admin requis
+ *       500:
+ *         description: Erreur serveur
+
+/**
+ * @swagger
+ * /admin/projects/{projectId}:
+ *   delete:
+ *     summary: Supprimer un projet (admin)
+ *     tags: [Admin]
+ *     security:
+ *       - sessionAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: projectId
+ *         required: true
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               reason:
+ *                 type: string
+ *                 description: Raison de la suppression
+ *     responses:
+ *       200:
+ *         description: Projet supprimé avec succès
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Success'
+ *       404:
+ *         description: Projet non trouvé
+ *       403:
+ *         description: Accès admin requis
+ *       500:
+ *         description: Erreur serveur
+
+/**
+ * @swagger
+ * /admin/deployments:
+ *   get:
+ *     summary: Déploiements avec filtres avancés (admin)
+ *     tags: [Admin]
+ *     security:
+ *       - sessionAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: page
+ *         schema:
+ *           type: integer
+ *           default: 1
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           default: 30
+ *       - in: query
+ *         name: search
+ *         schema:
+ *           type: string
+ *       - in: query
+ *         name: status
+ *         schema:
+ *           type: string
+ *           enum: [all, pending, building, success, failed, cancelled]
+ *       - in: query
+ *         name: project
+ *         schema:
+ *           type: string
+ *         description: ID du projet
+ *       - in: query
+ *         name: dateRange
+ *         schema:
+ *           type: string
+ *           enum: [all, 1d, 7d, 30d]
+ *           default: 7d
+ *       - in: query
+ *         name: sortBy
+ *         schema:
+ *           type: string
+ *           enum: [started_at, completed_at, status]
+ *           default: started_at
+ *       - in: query
+ *         name: sortOrder
+ *         schema:
+ *           type: string
+ *           enum: [asc, desc]
+ *           default: desc
+ *     responses:
+ *       200:
+ *         description: Liste des déploiements
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 deployments:
+ *                   type: array
+ *                   items:
+ *                     allOf:
+ *                       - $ref: '#/components/schemas/Deployment'
+ *                       - type: object
+ *                         properties:
+ *                           projects:
+ *                             type: object
+ *                             properties:
+ *                               name:
+ *                                 type: string
+ *                               github_repo:
+ *                                 type: string
+ *                               domain:
+ *                                 type: string
+ *                               framework:
+ *                                 type: string
+ *                               users:
+ *                                 type: object
+ *                                 properties:
+ *                                   username:
+ *                                     type: string
+ *                                   avatar_url:
+ *                                     type: string
+ *                 pagination:
+ *                   type: object
+ *                   properties:
+ *                     page:
+ *                       type: integer
+ *                     limit:
+ *                       type: integer
+ *                     total:
+ *                       type: integer
+ *                     totalPages:
+ *                       type: integer
+       403:
+         description: Accès admin requis
+       500:
+         description: Erreur serveur
+
+/**
+ * @swagger
+ * /admin/logs:
+ *   get:
+ *     summary: Logs des actions admin
+ *     tags: [Admin]
+ *     security:
+ *       - sessionAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: page
+ *         schema:
+ *           type: integer
+ *           default: 1
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           default: 50
+ *       - in: query
+ *         name: action_type
+ *         schema:
+ *           type: string
+ *       - in: query
+ *         name: admin_id
+ *         schema:
+ *           type: string
+ *       - in: query
+ *         name: dateRange
+ *         schema:
+ *           type: string
+ *           enum: [all, 1d, 7d, 30d]
+ *           default: 30d
+ *     responses:
+ *       200:
+ *         description: Logs des actions administratives
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 logs:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                     properties:
+ *                       id:
+ *                         type: string
+ *                       admin_id:
+ *                         type: string
+ *                       action_type:
+ *                         type: string
+ *                       resource_type:
+ *                         type: string
+ *                       resource_id:
+ *                         type: string
+ *                       details:
+ *                         type: object
+ *                       created_at:
+ *                         type: string
+ *                         format: date-time
+ *                       users:
+ *                         type: object
+ *                         properties:
+ *                           username:
+ *                             type: string
+ *                           avatar_url:
+ *                             type: string
+ *                 pagination:
+ *                   type: object
+ *                   properties:
+ *                     page:
+ *                       type: integer
+ *                     limit:
+ *                       type: integer
+ *                     total:
+ *                       type: integer
+ *                     totalPages:
+ *                       type: integer
+       403:
+         description: Accès admin requis
+       500:
+         description: Erreur serveur
+
+/**
+ * @swagger
+ * /admin/admins:
+ *   get:
+ *     summary: Liste des administrateurs
+ *     tags: [Admin]
+ *     security:
+ *       - sessionAuth: []
+ *     responses:
+ *       200:
+ *         description: Liste des administrateurs
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 admins:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                     properties:
+ *                       id:
+ *                         type: string
+ *                       username:
+ *                         type: string
+ *                       avatar_url:
+ *                         type: string
+ *                       created_at:
+ *                         type: string
+ *                         format: date-time
+ *                 count:
+ *                   type: number
+       403:
+         description: Accès admin requis
+       500:
+         description: Erreur serveur
+
+/**
+ * @swagger
+ * /admin/search:
+ *   get:
+ *     summary: Recherche globale dans l'admin
+ *     tags: [Admin]
+ *     security:
+ *       - sessionAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: query
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Terme de recherche
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           default: 10
+ *     responses:
+ *       200:
+ *         description: Résultats de recherche
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 results:
+ *                   type: object
+ *                   properties:
+ *                     users:
+ *                       type: array
+ *                       items:
+ *                         $ref: '#/components/schemas/User'
+ *                     projects:
+ *                       type: array
+ *                       items:
+ *                         $ref: '#/components/schemas/Project'
+ *                     deployments:
+ *                       type: array
+ *                       items:
+ *                         $ref: '#/components/schemas/Deployment'
+       403:
+         description: Accès admin requis
+       500:
+         description: Erreur serveur
+
+/**
+ * @swagger
+ * /admin/export/{type}:
+ *   get:
+ *     summary: Export de données
+ *     tags: [Admin]
+ *     security:
+ *       - sessionAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: type
+ *         required: true
+ *         schema:
+ *           type: string
+ *           enum: [users, projects, deployments]
+ *         description: Type de données à exporter
+ *       - in: query
+ *         name: format
+ *         schema:
+ *           type: string
+ *           enum: [csv, json]
+ *           default: csv
+ *         description: Format d'export
+ *     responses:
+ *       200:
+ *         description: Fichier exporté
+ *         content:
+ *           text/csv:
+ *             schema:
+ *               type: string
+ *           application/json:
+ *             schema:
+ *               type: array
+ *       400:
+ *         description: Type ou format non supporté
+ *       403:
+ *         description: Accès admin requis
+ *       500:
+ *         description: Erreur serveur
+
+/**
+ * @swagger
+ * /admin/analytics:
+ *   get:
+ *     summary: Analytics et rapports
+ *     tags: [Admin]
+ *     security:
+ *       - sessionAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: period
+ *         schema:
+ *           type: string
+ *           enum: [7d, 30d, 90d]
+ *           default: 30d
+ *         description: Période d'analyse
+ *     responses:
+ *       200:
+ *         description: Données analytiques
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 analytics:
+ *                   type: object
+ *                   properties:
+ *                     userGrowth:
+ *                       type: array
+ *                       items:
+ *                         type: object
+ *                         properties:
+ *                           date:
+ *                             type: string
+ *                           count:
+ *                             type: number
+ *                     deploymentTrends:
+ *                       type: array
+ *                       items:
+ *                         type: object
+ *                         properties:
+ *                           date:
+ *                             type: string
+ *                           success:
+ *                             type: number
+ *                           failed:
+ *                             type: number
+ *                           total:
+ *                             type: number
+ *                     projectsByFramework:
+ *                       type: array
+ *                       items:
+ *                         type: object
+ *                         properties:
+ *                           name:
+ *                             type: string
+ *                           count:
+ *                             type: number
+ *                     errorRates:
+ *                       type: array
+ *                       items:
+ *                         type: object
+ *                         properties:
+ *                           date:
+ *                             type: string
+ *                           errorRate:
+ *                             type: number
+ *                 period:
+ *                   type: string
+       403:
+         description: Accès admin requis
+       500:
+         description: Erreur serveur
+ */
 // backend/src/routes/admin.js - Version complète
 const express = require("express");
 const router = express.Router();

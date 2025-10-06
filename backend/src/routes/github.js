@@ -1,3 +1,273 @@
+// Ajoutez ces annotations au début du fichier backend/src/routes/github.js
+
+/**
+ * @swagger
+ * tags:
+ *   name: GitHub
+ *   description: Intégration avec l'API GitHub
+ */
+
+/**
+ * @swagger
+ * /github/repos:
+ *   get:
+ *     summary: Obtenir tous les repositories de l'utilisateur
+ *     tags: [GitHub]
+ *     security:
+ *       - sessionAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: type
+ *         schema:
+ *           type: string
+ *           enum: [all, owner, member]
+ *           default: all
+ *         description: Type de repositories
+ *       - in: query
+ *         name: sort
+ *         schema:
+ *           type: string
+ *           enum: [created, updated, pushed, full_name]
+ *           default: updated
+ *         description: Critère de tri
+ *       - in: query
+ *         name: direction
+ *         schema:
+ *           type: string
+ *           enum: [asc, desc]
+ *           default: desc
+ *         description: Direction du tri
+ *       - in: query
+ *         name: per_page
+ *         schema:
+ *           type: integer
+ *           default: 100
+ *           maximum: 100
+ *         description: Nombre de résultats par page
+ *       - in: query
+ *         name: page
+ *         schema:
+ *           type: integer
+ *           default: 1
+ *         description: Page de résultats
+ *       - in: query
+ *         name: search
+ *         schema:
+ *           type: string
+ *         description: Terme de recherche
+ *     responses:
+ *       200:
+ *         description: Liste des repositories
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 data:
+ *                   type: array
+ *                   items:
+ *                     $ref: '#/components/schemas/GitHubRepository'
+ *                 repositories:
+ *                   type: array
+ *                   items:
+ *                     $ref: '#/components/schemas/GitHubRepository'
+ *                 total:
+ *                   type: number
+ *                 page:
+ *                   type: number
+ *       400:
+ *         description: Token GitHub manquant
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       401:
+ *         description: Non authentifié
+ *       500:
+ *         description: Erreur serveur
+
+/**
+ * @swagger
+ * /github/repos/{owner}/{repo}/branches:
+ *   get:
+ *     summary: Obtenir les branches d'un repository
+ *     tags: [GitHub]
+ *     security:
+ *       - sessionAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: owner
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Propriétaire du repository
+ *       - in: path
+ *         name: repo
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Nom du repository
+ *     responses:
+ *       200:
+ *         description: Liste des branches
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 data:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                     properties:
+ *                       name:
+ *                         type: string
+ *                       sha:
+ *                         type: string
+ *                       protected:
+ *                         type: boolean
+ *       500:
+ *         description: Erreur serveur
+
+/**
+ * @swagger
+ * /github/repos/{owner}/{repo}/detect-framework:
+ *   post:
+ *     summary: Détecter automatiquement le framework d'un repository
+ *     tags: [GitHub]
+ *     security:
+ *       - sessionAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: owner
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Propriétaire du repository
+ *       - in: path
+ *         name: repo
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Nom du repository
+ *     responses:
+ *       200:
+ *         description: Framework détecté
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     framework:
+ *                       type: string
+ *                       description: Framework détecté
+ *                     confidence:
+ *                       type: number
+ *                       description: Niveau de confiance (0-1)
+ *                     buildCommand:
+ *                       type: string
+ *                       description: Commande de build recommandée
+ *                     outputDir:
+ *                       type: string
+ *                       description: Dossier de sortie recommandé
+ *                     installCommand:
+ *                       type: string
+ *                       description: Commande d'installation recommandée
+ *       500:
+ *         description: Erreur serveur
+
+/**
+ * @swagger
+ * /github/user:
+ *   get:
+ *     summary: Obtenir les informations de l'utilisateur GitHub connecté
+ *     tags: [GitHub]
+ *     security:
+ *       - sessionAuth: []
+ *     responses:
+ *       200:
+ *         description: Informations utilisateur GitHub
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     login:
+ *                       type: string
+ *                     name:
+ *                       type: string
+ *                     email:
+ *                       type: string
+ *                     avatar:
+ *                       type: string
+ *                     bio:
+ *                       type: string
+ *                     company:
+ *                       type: string
+ *                     location:
+ *                       type: string
+ *                     publicRepos:
+ *                       type: number
+ *                     followers:
+ *                       type: number
+ *                     following:
+ *                       type: number
+ *                     createdAt:
+ *                       type: string
+ *                       format: date-time
+ *       500:
+ *         description: Erreur serveur
+
+/**
+ * @swagger
+ * /github/test:
+ *   get:
+ *     summary: Route de test pour débugger l'intégration GitHub
+ *     tags: [GitHub]
+ *     security:
+ *       - sessionAuth: []
+ *     responses:
+ *       200:
+ *         description: Informations de debug
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 user:
+ *                   $ref: '#/components/schemas/User'
+ *                 tokenExists:
+ *                   type: boolean
+ *                 tokenPreview:
+ *                   type: string
+ *                 githubApiTest:
+ *                   type: object
+ *                   properties:
+ *                     status:
+ *                       type: string
+ *                     repoCount:
+ *                       type: number
+ *                     firstRepo:
+ *                       type: string
+ *       500:
+ *         description: Erreur serveur
+ */
 // backend/src/routes/github.js
 const express = require("express");
 const router = express.Router();

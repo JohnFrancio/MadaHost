@@ -1,3 +1,453 @@
+// Ajoutez ces annotations au début du fichier backend/src/routes/messages.js
+
+/**
+ * @swagger
+ * tags:
+ *   name: Messages
+ *   description: Système de support et messagerie
+ */
+
+/**
+ * @swagger
+ * /messages/unread-count:
+ *   get:
+ *     summary: Obtenir le nombre de messages non lus
+ *     tags: [Messages]
+ *     security:
+ *       - sessionAuth: []
+ *     responses:
+ *       200:
+ *         description: Nombre de messages non lus
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 count:
+ *                   type: number
+ *       500:
+ *         description: Erreur serveur
+
+/**
+ * @swagger
+ * /messages/conversations:
+ *   get:
+ *     summary: Obtenir toutes les conversations de l'utilisateur
+ *     tags: [Messages]
+ *     security:
+ *       - sessionAuth: []
+ *     responses:
+ *       200:
+ *         description: Liste des conversations
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 conversations:
+ *                   type: array
+ *                   items:
+ *                     $ref: '#/components/schemas/Conversation'
+ *       500:
+ *         description: Erreur serveur
+
+/**
+ * @swagger
+ * /messages/conversations:
+ *   post:
+ *     summary: Créer une nouvelle conversation (ticket de support)
+ *     tags: [Messages]
+ *     security:
+ *       - sessionAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - subject
+ *               - initialMessage
+ *             properties:
+ *               subject:
+ *                 type: string
+ *                 description: Sujet de la conversation
+ *               category:
+ *                 type: string
+ *                 enum: [general, technical, billing, feature_request]
+ *                 default: general
+ *               priority:
+ *                 type: string
+ *                 enum: [low, normal, high, urgent]
+ *                 default: normal
+ *               initialMessage:
+ *                 type: string
+ *                 description: Message initial du ticket
+ *     responses:
+ *       200:
+ *         description: Conversation créée avec succès
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 conversation:
+ *                   allOf:
+ *                     - $ref: '#/components/schemas/Conversation'
+ *                     - type: object
+ *                       properties:
+ *                         initial_message:
+ *                           $ref: '#/components/schemas/Message'
+ *                 message:
+ *                   type: string
+ *       400:
+ *         description: Données manquantes
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       500:
+ *         description: Erreur serveur
+
+/**
+ * @swagger
+ * /messages/conversations/{conversationId}/messages:
+ *   get:
+ *     summary: Obtenir les messages d'une conversation
+ *     tags: [Messages]
+ *     security:
+ *       - sessionAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: conversationId
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: ID de la conversation
+ *       - in: query
+ *         name: page
+ *         schema:
+ *           type: integer
+ *           default: 1
+ *         description: Page de résultats
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           default: 50
+ *         description: Nombre de messages par page
+ *     responses:
+ *       200:
+ *         description: Messages de la conversation
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 messages:
+ *                   type: array
+ *                   items:
+ *                     $ref: '#/components/schemas/Message'
+ *                 pagination:
+ *                   type: object
+ *                   properties:
+ *                     page:
+ *                       type: integer
+ *                     limit:
+ *                       type: integer
+ *                     hasMore:
+ *                       type: boolean
+ *       403:
+ *         description: Accès non autorisé
+ *       404:
+ *         description: Conversation non trouvée
+ *       500:
+ *         description: Erreur serveur
+
+/**
+ * @swagger
+ * /messages/conversations/{conversationId}/messages:
+ *   post:
+ *     summary: Envoyer un message dans une conversation
+ *     tags: [Messages]
+ *     security:
+ *       - sessionAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: conversationId
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: ID de la conversation
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - content
+ *             properties:
+ *               content:
+ *                 type: string
+ *                 description: Contenu du message
+ *               message_type:
+ *                 type: string
+ *                 enum: [text, image, file]
+ *                 default: text
+ *               attachments:
+ *                 type: array
+ *                 items:
+ *                   type: string
+ *                 description: Pièces jointes
+ *     responses:
+ *       200:
+ *         description: Message envoyé avec succès
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 message:
+ *                   $ref: '#/components/schemas/Message'
+ *       400:
+ *         description: Contenu manquant
+ *       403:
+ *         description: Accès non autorisé
+ *       404:
+ *         description: Conversation non trouvée
+ *       500:
+ *         description: Erreur serveur
+
+/**
+ * @swagger
+ * /messages/conversations/{conversationId}/auto-assign:
+ *   post:
+ *     summary: Auto-assignation d'un ticket à l'admin connecté
+ *     tags: [Messages]
+ *     security:
+ *       - sessionAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: conversationId
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: ID de la conversation
+ *     responses:
+ *       200:
+ *         description: Ticket assigné avec succès
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 conversation:
+ *                   $ref: '#/components/schemas/Conversation'
+ *                 message:
+ *                   type: string
+ *       400:
+ *         description: Ticket déjà assigné
+ *       403:
+ *         description: Accès admin requis
+ *       404:
+ *         description: Conversation non trouvée
+ *       500:
+ *         description: Erreur serveur
+
+/**
+ * @swagger
+ * /messages/admin/conversations:
+ *   get:
+ *     summary: Obtenir toutes les conversations (vue admin)
+ *     tags: [Messages]
+ *     security:
+ *       - sessionAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: status
+ *         schema:
+ *           type: string
+ *           enum: [all, open, in_progress, resolved, closed]
+ *         description: Filtrer par statut
+ *       - in: query
+ *         name: priority
+ *         schema:
+ *           type: string
+ *           enum: [all, low, normal, high, urgent]
+ *         description: Filtrer par priorité
+ *       - in: query
+ *         name: page
+ *         schema:
+ *           type: integer
+ *           default: 1
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           default: 20
+ *     responses:
+ *       200:
+ *         description: Liste des conversations avec statistiques
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 conversations:
+ *                   type: array
+ *                   items:
+ *                     allOf:
+ *                       - $ref: '#/components/schemas/Conversation'
+ *                       - type: object
+ *                         properties:
+ *                           user:
+ *                             type: object
+ *                             properties:
+ *                               username:
+ *                                 type: string
+ *                               avatar_url:
+ *                                 type: string
+ *                           admin:
+ *                             type: object
+ *                             properties:
+ *                               username:
+ *                                 type: string
+ *                               avatar_url:
+ *                                 type: string
+ *                 stats:
+ *                   type: object
+ *                   properties:
+ *                     total:
+ *                       type: number
+ *                     by_status:
+ *                       type: object
+ *                       additionalProperties:
+ *                         type: number
+ *                     by_priority:
+ *                       type: object
+ *                       additionalProperties:
+ *                         type: number
+ *                 pagination:
+ *                   type: object
+ *                   properties:
+ *                     page:
+ *                       type: integer
+ *                     limit:
+ *                       type: integer
+ *       403:
+ *         description: Accès admin requis
+ *       500:
+ *         description: Erreur serveur
+
+/**
+ * @swagger
+ * /messages/admin/conversations/{conversationId}/assign:
+ *   put:
+ *     summary: Assigner une conversation à un admin
+ *     tags: [Messages]
+ *     security:
+ *       - sessionAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: conversationId
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: ID de la conversation
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               admin_id:
+ *                 type: string
+ *                 description: ID de l'admin (null pour désassigner)
+ *     responses:
+ *       200:
+ *         description: Conversation assignée avec succès
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 conversation:
+ *                   $ref: '#/components/schemas/Conversation'
+ *                 message:
+ *                   type: string
+ *       400:
+ *         description: Admin non trouvé
+ *       403:
+ *         description: Accès admin requis
+ *       500:
+ *         description: Erreur serveur
+
+/**
+ * @swagger
+ * /messages/admin/conversations/{conversationId}/status:
+ *   put:
+ *     summary: Changer le statut d'une conversation
+ *     tags: [Messages]
+ *     security:
+ *       - sessionAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: conversationId
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: ID de la conversation
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - status
+ *             properties:
+ *               status:
+ *                 type: string
+ *                 enum: [open, in_progress, resolved, closed]
+ *     responses:
+ *       200:
+ *         description: Statut changé avec succès
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 conversation:
+ *                   $ref: '#/components/schemas/Conversation'
+ *                 message:
+ *                   type: string
+ *       400:
+ *         description: Statut invalide
+ *       403:
+ *         description: Accès admin requis
+ *       500:
+ *         description: Erreur serveur
+ */
 const express = require("express");
 const router = express.Router();
 const supabase = require("../config/supabase");

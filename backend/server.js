@@ -10,6 +10,7 @@ const StaticServer = require("./src/services/staticServer");
 const staticServer = new StaticServer();
 const http = require("http");
 const WebSocketManager = require("./src/services/websocket");
+const { serve, setup } = require("./src/config/swagger");
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -89,6 +90,32 @@ if (process.env.NODE_ENV !== "production") {
     next();
   });
 }
+
+app.use("/api-docs", serve, setup);
+app.get("/docs", (req, res) => {
+  res.redirect("/api-docs");
+});
+
+app.get("/api", (req, res) => {
+  res.json({
+    name: "MadaHost API",
+    version: "1.0.0",
+    description: "API de déploiement de sites web statiques avec GitHub",
+    documentation: {
+      swagger: `${req.protocol}://${req.get("host")}/api-docs`,
+      postman: "https://documenter.getpostman.com/view/your-collection-id",
+    },
+    endpoints: {
+      auth: "/auth",
+      projects: "/projects",
+      deployments: "/deployments",
+      github: "/github",
+      messages: "/messages",
+      admin: "/admin",
+    },
+    status: "running",
+  });
+});
 
 // Routes API
 const { router: authRouter } = require("./src/routes/auth");

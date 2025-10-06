@@ -29,7 +29,7 @@ services:
     ports:
       - "5173:5173"
     environment:
-      - DOCKER_ENV=true  # Important !
+      - DOCKER_ENV=true
     volumes:
       - ./frontend:/app
       - /app/node_modules
