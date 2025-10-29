@@ -1,6 +1,11 @@
 import { defineStore } from "pinia";
 import api from "@/utils/axios";
 
+const api = axios.create({
+  baseURL: import.meta.env.VITE_API_URL || "https://api.madahost.me/api",
+  withCredentials: true,
+});
+
 export const useAuthStore = defineStore("auth", {
   state: () => ({
     user: null,
