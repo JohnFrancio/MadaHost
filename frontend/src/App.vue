@@ -1,16 +1,20 @@
+<!-- frontend/src/App.vue - Version plein écran -->
 <script setup>
-import { onMounted, watch } from "vue";
-import { RouterView } from "vue-router";
+import { onMounted, watch, computed } from "vue";
+import { RouterView, useRoute } from "vue-router";
 import { useAuthStore } from "@/stores/auth";
 import { useThemeStore } from "@/stores/theme";
 import { useNotificationsStore } from "@/stores/notifications";
 import Navbar from "@/components/Navbar.vue";
 import NotificationContainer from "@/components/NotificationContainer.vue";
 
-// Stores
+const route = useRoute();
 const authStore = useAuthStore();
 const themeStore = useThemeStore();
 const notificationsStore = useNotificationsStore();
+
+// Vérifier si on est sur la page d'accueil
+const isHomePage = computed(() => route.path === "/");
 
 // Initialisation de l'app
 onMounted(async () => {
@@ -79,8 +83,8 @@ watch(
     <Navbar />
 
     <!-- Contenu principal -->
-    <main class="flex-1">
-      <div class="content-container section-padding">
+    <main class="flex-1" :class="{ 'overflow-x-hidden': isHomePage }">
+      <div :class="isHomePage ? '' : 'content-container section-padding'">
         <transition
           name="page"
           enter-active-class="transition duration-300 ease-out"
@@ -113,28 +117,36 @@ watch(
         >
       </div>
     </div>
-
-    <!-- Indicateur de connexion réseau -->
-    <!-- <div
-      v-if="!navigator.onLine"
-      class="fixed bottom-4 left-4 right-4 bg-red-600 text-white p-4 rounded-xl shadow-lg z-40 text-center"
-    >
-      <div class="flex items-center justify-center space-x-2">
-        <div class="w-2 h-2 bg-white rounded-full animate-pulse"></div>
-        <span class="font-medium">Connexion internet perdue</span>
-      </div>
-    </div> -->
   </div>
 </template>
 
 <style>
 /* Import de la police Inter */
-@import url("https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap");
 
 /* Variables CSS globales */
 :root {
   --ease-out-cubic: cubic-bezier(0.33, 1, 0.68, 1);
   --ease-in-cubic: cubic-bezier(0.32, 0, 0.67, 0);
   --ease-in-out-cubic: cubic-bezier(0.65, 0, 0.35, 1);
+}
+
+/* Reset pour supprimer les marges par défaut */
+body {
+  margin: 0;
+  padding: 0;
+  overflow-x: hidden;
+}
+
+#app {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  overflow-x: hidden;
+}
+
+/* Smooth scroll */
+html {
+  scroll-behavior: smooth;
 }
 </style>
