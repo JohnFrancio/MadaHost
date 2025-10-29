@@ -1,7 +1,7 @@
 <script setup>
 import { ref, computed, onMounted } from "vue";
 import { useAuthStore } from "@/stores/auth";
-import axios from "axios";
+import api from "@/utils/axios";
 import NewProjectModal from "@/components/NewProjectModal.vue";
 
 const authStore = useAuthStore();
@@ -10,8 +10,10 @@ const authStore = useAuthStore();
 const projects = ref([]);
 const githubRepos = ref([]);
 const loadingRepos = ref(false);
+const loadingProjects = ref(false);
 const showNewProjectModal = ref(false);
 const deploying = ref(false);
+const error = ref(null);
 
 // Computed
 const activeProjects = computed(
@@ -37,17 +39,26 @@ const getStatusText = (status) => {
 
 const loadProjects = async () => {
   try {
-    const response = await axios.get("/api/projects");
+    loadingProjects.value = true;
+    error.value = null;
+
+    console.log("📡 Chargement des projets...");
+    const response = await api.get("/projects"); // ⬅️ Sans /api car déjà dans baseURL
+
+    console.log("✅ Projets chargés:", response.data);
     projects.value = response.data.projects || [];
-  } catch (error) {
-    console.error("Erreur lors du chargement des projets:", error);
+  } catch (err) {
+    console.error("❌ Erreur chargement projets:", err);
+    error.value = err.response?.data?.error || err.message;
+  } finally {
+    loadingProjects.value = false;
   }
 };
 
 const loadGitHubRepos = async () => {
   try {
     loadingRepos.value = true;
-    const response = await axios.get("/api/projects/github-repos");
+    const response = await api.get("/projects/github-repos"); // ⬅️ Sans /api
     githubRepos.value = response.data.repos || [];
     console.log("Repos GitHub chargés:", githubRepos.value.length);
   } catch (error) {
@@ -71,9 +82,8 @@ onMounted(async () => {
 const deployProject = async (id) => {
   deploying.value = true;
   try {
-    const response = await axios.post(`/api/projects/${id}/deploy`);
+    const response = await api.post(`/projects/${id}/deploy`); // ⬅️ Sans /api
     console.log("Déploiement initié:", response.data);
-    // Recharger les données
     await loadProjects();
   } catch (error) {
     console.error("Erreur lors du déploiement:", error);
