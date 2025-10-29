@@ -1,7 +1,7 @@
 # Build stage
 FROM node:18-alpine AS builder
 
-WORKDIR /app
+WORKDIR /backend
 
 # Copier package.json et package-lock.json
 COPY package*.json ./
@@ -12,7 +12,7 @@ RUN npm ci --only=production
 # Production stage
 FROM node:18-alpine
 
-WORKDIR /app
+WORKDIR /backend
 
 # Installer curl pour healthcheck
 RUN apk add --no-cache curl
@@ -22,7 +22,7 @@ RUN addgroup -g 1001 -S nodejs && \
     adduser -S nodejs -u 1001
 
 # Copier les dépendances depuis builder
-COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder /backend/node_modules ./node_modules
 
 # Copier le code source
 COPY --chown=nodejs:nodejs . .
