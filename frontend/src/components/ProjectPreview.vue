@@ -1,4 +1,4 @@
-<!-- frontend/src/components/ProjectPreview.vue - AVEC FIX IFRAME -->
+<!-- frontend/src/components/ProjectPreview.vue - VERSION DOCKER -->
 
 <script setup>
 import { ref, computed, onMounted, nextTick } from "vue";
@@ -28,26 +28,25 @@ const iframeBlocked = ref(false);
 // Variable pour le mode développement
 const isDev = import.meta.env.DEV;
 
-// URL du site déployé pour le clic (ouverture dans nouvel onglet)
+// ✅ URL du site déployé (toujours via le domaine wildcard)
 const siteUrl = computed(() => {
-  if (isDev) {
-    // En développement, utiliser le serveur statique local
-    return `http://localhost:3002/project/${props.project.id}/`;
-  } else {
-    // En production, utiliser le domaine
-    return `https://${props.project.domain}/`;
+  if (!props.project.domain || props.project.status !== "active") {
+    return null;
   }
+
+  // En développement, peut pointer vers localhost si configuré
+  if (isDev) {
+    // Si tu testes en local avec /etc/hosts ou autre
+    return `http://${props.project.domain}`;
+  }
+
+  // En production, toujours HTTPS
+  return `https://${props.project.domain}`;
 });
 
-// URL spéciale pour l'iframe (sans restrictions X-Frame-Options)
+// ✅ URL pour l'iframe (même URL, Nginx gère les headers)
 const previewUrl = computed(() => {
-  if (isDev) {
-    // Route spéciale pour l'aperçu sans restrictions iframe
-    return `http://localhost:3002/preview/${props.project.id}/`;
-  } else {
-    // En production, on peut utiliser la même URL ou une route dédiée
-    return `https://preview.${props.project.domain}/`;
-  }
+  return siteUrl.value;
 });
 
 // Méthodes
@@ -70,6 +69,8 @@ const onPreviewError = (event) => {
 };
 
 const refreshPreview = async () => {
+  if (!siteUrl.value) return;
+
   refreshing.value = true;
   previewLoading.value = true;
   previewError.value = false;
@@ -78,9 +79,9 @@ const refreshPreview = async () => {
 
   // Attendre un peu pour l'effet visuel
   setTimeout(() => {
-    if (previewFrame.value) {
+    if (previewFrame.value && siteUrl.value) {
       // Ajouter un timestamp pour éviter le cache
-      const url = new URL(previewUrl.value);
+      const url = new URL(siteUrl.value);
       url.searchParams.set("t", Date.now().toString());
       previewFrame.value.src = url.toString();
     }
@@ -89,24 +90,26 @@ const refreshPreview = async () => {
 };
 
 const openSite = () => {
-  if (props.project.status === "active") {
+  if (props.project.status === "active" && siteUrl.value) {
     window.open(siteUrl.value, "_blank");
   }
 };
 
 const tryScreenshot = async () => {
   showScreenshot.value = true;
-  // Ici, vous pourriez implémenter une logique pour générer des screenshots
-  // Par exemple, via une API comme htmlcsstoimage.com ou screenshot.guru
+  // TODO: Implémenter une API de screenshot si nécessaire
+  // Par exemple: https://api.screenshotmachine.com ou https://htmlcsstoimage.com
 };
 
 const getStatusClass = (status) => {
   const classes = {
-    active: "bg-green-100 text-green-800",
-    building: "bg-yellow-100 text-yellow-800",
-    error: "bg-red-100 text-red-800",
-    inactive: "bg-gray-100 text-gray-800",
-    created: "bg-gray-100 text-gray-800",
+    active:
+      "bg-green-100 text-green-800 dark:bg-green-900/20 dark:text-green-400",
+    building:
+      "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/20 dark:text-yellow-400",
+    error: "bg-red-100 text-red-800 dark:bg-red-900/20 dark:text-red-400",
+    inactive: "bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-400",
+    created: "bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-400",
   };
   return classes[status] || "bg-gray-100 text-gray-800";
 };
@@ -123,6 +126,8 @@ const getStatusText = (status) => {
 };
 
 const formatDate = (dateString) => {
+  if (!dateString) return "Jamais";
+
   const date = new Date(dateString);
   const now = new Date();
   const diffInHours = (now - date) / (1000 * 60 * 60);
@@ -130,13 +135,11 @@ const formatDate = (dateString) => {
   if (diffInHours < 1) {
     return "Il y a moins d'une heure";
   } else if (diffInHours < 24) {
-    return `Il y a ${Math.floor(diffInHours)} heure${
-      Math.floor(diffInHours) > 1 ? "s" : ""
-    }`;
+    const hours = Math.floor(diffInHours);
+    return `Il y a ${hours} heure${hours > 1 ? "s" : ""}`;
   } else if (diffInHours < 168) {
-    return `Il y a ${Math.floor(diffInHours / 24)} jour${
-      Math.floor(diffInHours / 24) > 1 ? "s" : ""
-    }`;
+    const days = Math.floor(diffInHours / 24);
+    return `Il y a ${days} jour${days > 1 ? "s" : ""}`;
   } else {
     return date.toLocaleDateString("fr-FR", {
       day: "numeric",
@@ -162,7 +165,7 @@ const checkIframeLoad = () => {
 
 // Lifecycle
 onMounted(async () => {
-  if (props.project.status === "active") {
+  if (props.project.status === "active" && props.project.domain) {
     await nextTick();
     setTimeout(() => {
       previewLoading.value = true;
@@ -176,34 +179,41 @@ onMounted(async () => {
 
 <template>
   <div
-    class="bg-white border border-gray-200 rounded-xl p-4 hover:shadow-md transition-all duration-200"
+    class="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl p-4 hover:shadow-md transition-all duration-200"
   >
+    <!-- Header -->
     <div class="flex items-center justify-between mb-3">
-      <h4 class="text-md font-medium text-gray-900">Aperçu du site</h4>
+      <h4 class="text-md font-medium text-gray-900 dark:text-white">
+        Aperçu du site
+      </h4>
       <div class="flex items-center space-x-2">
+        <!-- Refresh button -->
         <button
+          v-if="project.status === 'active' && siteUrl"
           @click="refreshPreview"
           :disabled="refreshing"
-          class="text-gray-400 hover:text-gray-600 p-1 rounded"
+          class="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 p-1 rounded transition-colors"
           title="Actualiser l'aperçu"
         >
           <ArrowPathIcon :class="['w-4 h-4', refreshing && 'animate-spin']" />
         </button>
 
+        <!-- Screenshot fallback button -->
         <button
           v-if="iframeBlocked && project.status === 'active'"
           @click="tryScreenshot"
-          class="text-purple-600 hover:text-purple-800 p-1 rounded"
+          class="text-purple-600 hover:text-purple-800 dark:text-purple-400 dark:hover:text-purple-300 p-1 rounded"
           title="Essayer un screenshot"
         >
           <PhotoIcon class="w-4 h-4" />
         </button>
 
+        <!-- Open in new tab -->
         <a
-          v-if="project.status === 'active'"
+          v-if="project.status === 'active' && siteUrl"
           :href="siteUrl"
           target="_blank"
-          class="text-blue-600 hover:text-blue-800 p-1 rounded"
+          class="text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300 p-1 rounded"
           title="Ouvrir le site"
         >
           <LinkIcon class="w-4 h-4" />
@@ -211,39 +221,47 @@ onMounted(async () => {
       </div>
     </div>
 
-    <!-- Aperçu du site -->
+    <!-- Preview Area -->
     <div class="relative group cursor-pointer" @click="openSite">
+      <!-- Projet non déployé -->
       <div
-        v-if="project.status !== 'active'"
-        class="aspect-video bg-gray-100 rounded-lg flex items-center justify-center"
+        v-if="project.status !== 'active' || !project.domain"
+        class="aspect-video bg-gray-100 dark:bg-gray-800 rounded-lg flex items-center justify-center"
       >
         <div class="text-center">
-          <GlobeAltIcon class="w-8 h-8 text-gray-400 mx-auto mb-2" />
-          <p class="text-sm text-gray-500">Site non déployé</p>
-          <p class="text-xs text-gray-400">
+          <GlobeAltIcon
+            class="w-8 h-8 text-gray-400 dark:text-gray-600 mx-auto mb-2"
+          />
+          <p class="text-sm text-gray-500 dark:text-gray-400">
+            Site non déployé
+          </p>
+          <p class="text-xs text-gray-400 dark:text-gray-500">
             Lancez un déploiement pour voir l'aperçu
           </p>
         </div>
       </div>
 
+      <!-- Aperçu du site déployé -->
       <div
         v-else
-        class="aspect-video bg-gray-100 rounded-lg overflow-hidden relative"
+        class="aspect-video bg-gray-100 dark:bg-gray-800 rounded-lg overflow-hidden relative"
       >
         <!-- Loading state -->
         <div
           v-if="previewLoading && !iframeBlocked"
-          class="absolute inset-0 flex items-center justify-center bg-gray-50"
+          class="absolute inset-0 flex items-center justify-center bg-gray-50 dark:bg-gray-800"
         >
           <div class="text-center">
             <div
-              class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-2"
+              class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 dark:border-blue-400 mx-auto mb-2"
             ></div>
-            <p class="text-sm text-gray-600">Génération de l'aperçu...</p>
+            <p class="text-sm text-gray-600 dark:text-gray-400">
+              Génération de l'aperçu...
+            </p>
           </div>
         </div>
 
-        <!-- Aperçu iframe (utilise la route /preview/ spéciale) -->
+        <!-- Iframe preview -->
         <iframe
           v-show="!previewLoading && !previewError && !iframeBlocked"
           ref="previewFrame"
@@ -254,16 +272,19 @@ onMounted(async () => {
           @error="onPreviewError"
           sandbox="allow-same-origin allow-scripts allow-popups allow-forms"
           loading="lazy"
+          title="Aperçu du site"
         />
 
-        <!-- Erreur de chargement -->
+        <!-- Error state -->
         <div
           v-if="previewError && !showScreenshot"
-          class="absolute inset-0 flex items-center justify-center bg-red-50"
+          class="absolute inset-0 flex items-center justify-center bg-red-50 dark:bg-red-900/20"
         >
-          <div class="text-center">
-            <ExclamationCircleIcon class="w-8 h-8 text-red-500 mx-auto mb-2" />
-            <p class="text-sm text-red-600 mb-2">
+          <div class="text-center p-4">
+            <ExclamationCircleIcon
+              class="w-8 h-8 text-red-500 dark:text-red-400 mx-auto mb-2"
+            />
+            <p class="text-sm text-red-600 dark:text-red-400 mb-2">
               {{
                 iframeBlocked
                   ? "Aperçu bloqué par sécurité"
@@ -273,16 +294,16 @@ onMounted(async () => {
 
             <div class="space-y-2">
               <button
-                @click="refreshPreview"
-                class="text-xs text-red-500 hover:text-red-700 block mx-auto"
+                @click.stop="refreshPreview"
+                class="text-xs text-red-500 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300 block mx-auto"
               >
                 Réessayer
               </button>
 
               <button
                 v-if="iframeBlocked"
-                @click="tryScreenshot"
-                class="text-xs text-purple-500 hover:text-purple-700 block mx-auto"
+                @click.stop="tryScreenshot"
+                class="text-xs text-purple-500 hover:text-purple-700 dark:text-purple-400 dark:hover:text-purple-300 block mx-auto"
               >
                 Essayer un screenshot
               </button>
@@ -290,43 +311,50 @@ onMounted(async () => {
               <a
                 :href="siteUrl"
                 target="_blank"
-                class="text-xs text-blue-500 hover:text-blue-700 block mx-auto"
+                @click.stop
+                class="text-xs text-blue-500 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 block mx-auto"
               >
-                Ouvrir dans un nouvel onglet
+                Ouvrir dans un nouvel onglet →
               </a>
             </div>
           </div>
         </div>
 
-        <!-- Alternative screenshot -->
+        <!-- Screenshot mode -->
         <div
           v-if="showScreenshot"
-          class="absolute inset-0 flex items-center justify-center bg-purple-50"
+          class="absolute inset-0 flex items-center justify-center bg-purple-50 dark:bg-purple-900/20"
         >
-          <div class="text-center">
-            <PhotoIcon class="w-8 h-8 text-purple-500 mx-auto mb-2" />
-            <p class="text-sm text-purple-600 mb-2">Mode screenshot</p>
-            <p class="text-xs text-purple-400">
+          <div class="text-center p-4">
+            <PhotoIcon
+              class="w-8 h-8 text-purple-500 dark:text-purple-400 mx-auto mb-2"
+            />
+            <p class="text-sm text-purple-600 dark:text-purple-400 mb-2">
+              Mode screenshot
+            </p>
+            <p class="text-xs text-purple-400 dark:text-purple-500">
               Fonctionnalité en développement
             </p>
             <a
               :href="siteUrl"
               target="_blank"
-              class="text-xs text-blue-500 hover:text-blue-700 block mx-auto mt-2"
+              @click.stop
+              class="text-xs text-blue-500 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 block mx-auto mt-2"
             >
-              Ouvrir dans un nouvel onglet
+              Ouvrir dans un nouvel onglet →
             </a>
           </div>
         </div>
 
-        <!-- Overlay pour le clic -->
+        <!-- Hover overlay -->
         <div
-          class="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-10 transition-all duration-200 flex items-center justify-center"
+          v-if="!previewError && !previewLoading"
+          class="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-10 transition-all duration-200 flex items-center justify-center pointer-events-none"
         >
           <div
-            class="opacity-0 group-hover:opacity-100 transition-opacity duration-200 bg-white rounded-full p-3 shadow-lg"
+            class="opacity-0 group-hover:opacity-100 transition-opacity duration-200 bg-white dark:bg-gray-800 rounded-full p-3 shadow-lg"
           >
-            <LinkIcon class="w-6 h-6 text-gray-700" />
+            <LinkIcon class="w-6 h-6 text-gray-700 dark:text-gray-300" />
           </div>
         </div>
       </div>
@@ -334,22 +362,27 @@ onMounted(async () => {
 
     <!-- Informations -->
     <div class="mt-3 space-y-2">
+      <!-- URL -->
       <div class="flex items-center justify-between">
-        <span class="text-sm text-gray-600">URL:</span>
+        <span class="text-sm text-gray-600 dark:text-gray-400">URL:</span>
         <a
-          v-if="project.status === 'active'"
+          v-if="project.status === 'active' && siteUrl"
           :href="siteUrl"
           target="_blank"
-          class="text-sm text-blue-600 hover:text-blue-800 font-mono truncate max-w-48"
-          :title="siteUrl"
+          class="text-sm text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300 font-mono truncate max-w-48"
+          :title="project.domain"
+          @click.stop
         >
-          {{ siteUrl }}
+          {{ project.domain }}
         </a>
-        <span v-else class="text-sm text-gray-400">Non disponible</span>
+        <span v-else class="text-sm text-gray-400 dark:text-gray-500">
+          Non disponible
+        </span>
       </div>
 
+      <!-- Statut -->
       <div class="flex items-center justify-between">
-        <span class="text-sm text-gray-600">Statut:</span>
+        <span class="text-sm text-gray-600 dark:text-gray-400">Statut:</span>
         <span
           :class="getStatusClass(project.status)"
           class="px-2 py-1 rounded-full text-xs font-medium"
@@ -358,23 +391,34 @@ onMounted(async () => {
         </span>
       </div>
 
+      <!-- Date de déploiement -->
       <div
         v-if="project.last_deployed"
         class="flex items-center justify-between"
       >
-        <span class="text-sm text-gray-600">Déployé:</span>
-        <span class="text-sm text-gray-900">
+        <span class="text-sm text-gray-600 dark:text-gray-400">Déployé:</span>
+        <span class="text-sm text-gray-900 dark:text-gray-100">
           {{ formatDate(project.last_deployed) }}
         </span>
       </div>
 
-      <!-- Debug info en mode dev -->
-      <div v-if="isDev" class="mt-2 p-2 bg-blue-50 rounded text-xs">
-        <p class="text-blue-700">🔧 Debug Mode</p>
-        <p class="text-blue-600">Preview URL: {{ previewUrl }}</p>
-        <p class="text-blue-600">Site URL: {{ siteUrl }}</p>
-        <p v-if="iframeBlocked" class="text-red-600">
-          ⚠️ Iframe bloquée - Vérifiez les headers X-Frame-Options
+      <!-- Debug info (mode dev uniquement) -->
+      <div
+        v-if="isDev"
+        class="mt-2 p-2 bg-blue-50 dark:bg-blue-900/20 rounded text-xs space-y-1"
+      >
+        <p class="text-blue-700 dark:text-blue-400 font-bold">🔧 Debug Mode</p>
+        <p class="text-blue-600 dark:text-blue-300 font-mono text-[10px]">
+          URL: {{ siteUrl || "N/A" }}
+        </p>
+        <p class="text-blue-600 dark:text-blue-300">
+          Domain: {{ project.domain || "N/A" }}
+        </p>
+        <p class="text-blue-600 dark:text-blue-300">
+          Status: {{ project.status }}
+        </p>
+        <p v-if="iframeBlocked" class="text-red-600 dark:text-red-400">
+          ⚠️ Iframe bloquée - Vérifiez X-Frame-Options dans Nginx
         </p>
       </div>
     </div>
@@ -382,23 +426,19 @@ onMounted(async () => {
 </template>
 
 <style scoped>
-/* Style pour masquer la scrollbar de l'iframe */
+/* Masquer scrollbar iframe */
 iframe {
-  scrollbar-width: none; /* Firefox */
-  -ms-overflow-style: none; /* Internet Explorer 10+ */
+  scrollbar-width: none;
+  -ms-overflow-style: none;
 }
 
 iframe::-webkit-scrollbar {
   width: 0;
   height: 0;
-  display: none; /* Chrome, Safari, Opera */
+  display: none;
 }
 
-/* Animation pour les erreurs */
-.error-bounce {
-  animation: bounce 0.5s ease-in-out;
-}
-
+/* Animation bounce pour erreurs */
 @keyframes bounce {
   0%,
   20%,
@@ -415,7 +455,11 @@ iframe::-webkit-scrollbar {
   }
 }
 
-/* Animation de survol pour l'aperçu */
+.error-bounce {
+  animation: bounce 0.5s ease-in-out;
+}
+
+/* Transition hover */
 .preview-container {
   transition: transform 0.2s ease-in-out;
 }

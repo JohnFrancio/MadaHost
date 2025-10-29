@@ -1,54 +1,4 @@
-// backend/src/routes/deployments.js - CORRIGÉ FINAL
-// Ajoutez ces annotations au début du fichier backend/src/routes/deployments.js
-
-/**
- * @swagger
- * tags:
- *   name: Deployments
- *   description: Gestion des déploiements de projets
- */
-
-/**
- * @swagger
- * /deployments/projects/{projectId}:
- *   get:
- *     summary: Obtenir les déploiements d'un projet
- *     tags: [Deployments]
- *     security:
- *       - sessionAuth: []
- *     parameters:
- *       - in: path
- *         name: projectId
- *         required: true
- *         schema:
- *           type: string
- *         description: ID du projet
- *       - in: query
- *         name: page
- *         schema:
- *           type: integer
- *           default: 1
- *         description: Page de résultats
- *       - in: query
- *         name: limit
- *         schema:
- *           type: integer
- *           default: 20
- *         description: Nombre de résultats par page
- *     responses:
- *       200:
- *         description: Liste des déploiements
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 success:
- *                   type: boolean
- *                 deployments:
- *                   type: array
- *
- */
+// backend/src/routes/deployments.js - VERSION COMPLÈTE DOCKER
 const express = require("express");
 const UniversalFrameworkHandler = require("../utils/universalFrameworkHandler");
 const router = express.Router();
@@ -57,6 +7,8 @@ const { exec } = require("child_process");
 const fs = require("fs").promises;
 const path = require("path");
 const { requireAuth } = require("../middleware/auth");
+
+// ==================== ROUTES ====================
 
 // Route pour récupérer les déploiements d'un projet
 router.get("/projects/:projectId", requireAuth, async (req, res) => {
@@ -94,7 +46,7 @@ router.get("/projects/:projectId", requireAuth, async (req, res) => {
   }
 });
 
-// Route pour récupérer UN déploiement spécifique (manquant dans ton backend)
+// Route pour récupérer UN déploiement spécifique
 router.get("/:deploymentId", requireAuth, async (req, res) => {
   try {
     console.log(`🔍 Récupération déploiement ${req.params.deploymentId}`);
@@ -140,10 +92,10 @@ router.get("/stats", requireAuth, async (req, res) => {
       return res.json({
         success: true,
         stats: {
-          totalDeployments: 0,
-          successfulDeployments: 0,
-          failedDeployments: 0,
-          successRate: 0,
+          total: 0,
+          success: 0,
+          failed: 0,
+          avgTime: 0,
         },
       });
     }
@@ -151,37 +103,50 @@ router.get("/stats", requireAuth, async (req, res) => {
     const projectIds = projects.map((p) => p.id);
 
     // Compter tous les déploiements
-    const { count: totalDeployments } = await supabase
+    const { count: total } = await supabase
       .from("deployments")
-      .select("*", { count: "exact" })
+      .select("*", { count: "exact", head: true })
       .in("project_id", projectIds);
 
     // Compter les déploiements réussis
-    const { count: successfulDeployments } = await supabase
+    const { count: success } = await supabase
       .from("deployments")
-      .select("*", { count: "exact" })
+      .select("*", { count: "exact", head: true })
       .in("project_id", projectIds)
       .eq("status", "success");
 
     // Compter les déploiements échoués
-    const { count: failedDeployments } = await supabase
+    const { count: failed } = await supabase
       .from("deployments")
-      .select("*", { count: "exact" })
+      .select("*", { count: "exact", head: true })
       .in("project_id", projectIds)
       .eq("status", "failed");
 
-    const successRate =
-      totalDeployments > 0
-        ? Math.round((successfulDeployments / totalDeployments) * 100)
-        : 0;
+    // Calculer le temps moyen
+    const { data: completedDeployments } = await supabase
+      .from("deployments")
+      .select("started_at, completed_at")
+      .in("project_id", projectIds)
+      .eq("status", "success")
+      .not("completed_at", "is", null);
+
+    let avgTime = 0;
+    if (completedDeployments && completedDeployments.length > 0) {
+      const totalTime = completedDeployments.reduce((acc, d) => {
+        const start = new Date(d.started_at);
+        const end = new Date(d.completed_at);
+        return acc + (end - start) / 1000; // en secondes
+      }, 0);
+      avgTime = Math.round(totalTime / completedDeployments.length);
+    }
 
     res.json({
       success: true,
       stats: {
-        totalDeployments: totalDeployments || 0,
-        successfulDeployments: successfulDeployments || 0,
-        failedDeployments: failedDeployments || 0,
-        successRate,
+        total: total || 0,
+        success: success || 0,
+        failed: failed || 0,
+        avgTime,
       },
     });
   } catch (error) {
@@ -314,7 +279,7 @@ router.get("/:deploymentId/logs", requireAuth, async (req, res) => {
   }
 });
 
-// Route pour annuler un déploiement (DELETE au lieu de POST)
+// Route pour annuler un déploiement
 router.delete("/:deploymentId", requireAuth, async (req, res) => {
   try {
     console.log(`❌ Annulation déploiement ${req.params.deploymentId}`);
@@ -365,19 +330,26 @@ router.delete("/:deploymentId", requireAuth, async (req, res) => {
   }
 });
 
-// Remplacer la fonction deployProject dans backend/src/routes/deployments.js
+// ==================== FONCTION PRINCIPALE DE DÉPLOIEMENT ====================
+
 async function deployProject(deploymentId, project) {
+  let primaryFramework = null;
+  const deploymentDir = path.join(__dirname, "../../temp", deploymentId);
+
   try {
     console.log(
       `🚀 Démarrage déploiement ${deploymentId} pour ${project.name}`
     );
 
-    const deploymentDir = path.join(__dirname, "../../temp", deploymentId);
-    const outputDir = path.join(__dirname, "../../public", project.id);
+    // ✅ IMPORTANT: Générer le sous-domaine et le dossier de sortie
+    const subdomain = project.name.toLowerCase().replace(/[^a-z0-9]/g, "-");
+    const outputDir = path.join("/var/www/deployed", subdomain);
+
     let buildLog = "";
 
     // Mettre à jour le statut
     buildLog += `🚀 [${new Date().toISOString()}] Démarrage du déploiement...\n`;
+    buildLog += `📁 Dossier de sortie: /var/www/deployed/${subdomain}\n`;
     await updateDeploymentLog(deploymentId, buildLog);
 
     // Créer les dossiers
@@ -395,7 +367,7 @@ async function deployProject(deploymentId, project) {
       throw new Error("Token GitHub manquant pour l'utilisateur");
     }
 
-    // Cloner avec le token
+    // ==================== CLONAGE ====================
     buildLog += `📥 [${new Date().toISOString()}] Clonage de ${
       project.github_repo
     }...\n`;
@@ -411,6 +383,7 @@ async function deployProject(deploymentId, project) {
       .from("deployments")
       .update({ status: "cloning", build_log: buildLog })
       .eq("id", deploymentId);
+
     await execCommand(cloneCommand);
     buildLog += `✅ Repository cloné avec succès\n`;
 
@@ -428,14 +401,12 @@ async function deployProject(deploymentId, project) {
       buildLog += `⚠️ Impossible de récupérer le commit hash\n`;
     }
 
-    // ==================== DÉTECTION ET CONFIGURATION AUTOMATIQUE ====================
-    // ==================== DÉTECTION ET CONFIGURATION AUTOMATIQUE ====================
+    // ==================== DÉTECTION ET CONFIGURATION ====================
     buildLog += `🔍 [${new Date().toISOString()}] Détection des frameworks...\n`;
     await updateDeploymentLog(deploymentId, buildLog);
 
     const frameworkHandler = new UniversalFrameworkHandler();
 
-    // Utiliser la nouvelle méthode detectFrameworks qui retourne configs
     const {
       frameworks: detectedFrameworks,
       configs: frameworkConfigs,
@@ -443,19 +414,16 @@ async function deployProject(deploymentId, project) {
     } = await frameworkHandler.detectFrameworks(deploymentDir);
     buildLog += detectionLog;
 
-    let primaryFramework = null;
     let finalBuildCommand = project.build_command;
     let finalOutputDir = project.output_dir || "dist";
     let finalInstallCommand = project.install_command || "npm install";
 
     if (frameworkConfigs.length > 0) {
-      // Prendre le framework avec la plus haute confidence
       primaryFramework = frameworkConfigs[0];
       buildLog += `🎯 Framework principal détecté: ${
         primaryFramework.name
       } (${Math.round(primaryFramework.confidence * 100)}%)\n`;
 
-      // Utiliser la configuration automatique si pas de configuration manuelle
       if (!project.build_command || project.build_command === "npm run build") {
         finalBuildCommand = primaryFramework.config.buildCommand;
         buildLog += `🔧 Commande de build automatique: ${finalBuildCommand}\n`;
@@ -474,7 +442,7 @@ async function deployProject(deploymentId, project) {
       }
     }
 
-    // Configuration et installation des dépendances
+    // Setup des frameworks
     const { buildLog: setupLog, missingDeps } =
       await frameworkHandler.setupFrameworks(
         deploymentDir,
@@ -502,7 +470,9 @@ async function deployProject(deploymentId, project) {
       await updateDeploymentLog(deploymentId, buildLog);
 
       buildLog += `🔧 Commande d'installation: ${finalInstallCommand}\n`;
-      await execCommand(`cd ${deploymentDir} && ${finalInstallCommand}`);
+      const installOutput = await execCommand(
+        `cd ${deploymentDir} && ${finalInstallCommand}`
+      );
       buildLog += `✅ Dépendances installées avec succès\n`;
     } catch (error) {
       buildLog += `⚠️ Pas de package.json trouvé ou erreur installation: ${error.message}\n`;
@@ -515,7 +485,6 @@ async function deployProject(deploymentId, project) {
       await updateDeploymentLog(deploymentId, buildLog);
 
       try {
-        // Variables d'environnement optimisées selon le framework
         let buildEnv = {
           NODE_ENV: "production",
           CI: "true",
@@ -525,7 +494,6 @@ async function deployProject(deploymentId, project) {
         if (primaryFramework) {
           buildEnv = { ...buildEnv, ...primaryFramework.config.env };
 
-          // Variables spécifiques par framework
           if (primaryFramework.name === "vue") {
             buildEnv.VUE_APP_NODE_ENV = "production";
           } else if (primaryFramework.name === "react") {
@@ -535,7 +503,7 @@ async function deployProject(deploymentId, project) {
           }
         }
 
-        await execCommand(
+        const buildOutput = await execCommand(
           `cd ${deploymentDir} && ${finalBuildCommand}`,
           buildEnv
         );
@@ -545,7 +513,7 @@ async function deployProject(deploymentId, project) {
       } catch (buildError) {
         buildLog += `⚠️ Build échoué: ${buildError.message}\n`;
 
-        // Stratégies de fallback selon le framework
+        // Stratégies de fallback
         if (
           primaryFramework?.name === "vue" &&
           buildError.message.includes("terser")
@@ -564,9 +532,8 @@ async function deployProject(deploymentId, project) {
           primaryFramework?.name === "react" &&
           buildError.message.includes("terser")
         ) {
-          buildLog += `🔄 Tentative build React avec Vite alternatif...\n`;
+          buildLog += `🔄 Tentative build React avec config simplifiée...\n`;
           try {
-            // Créer une config Vite simplifiée
             const viteConfigPath = path.join(deploymentDir, "vite.config.js");
             const simpleConfig = `import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
@@ -588,7 +555,6 @@ export default defineConfig({
             throw buildError;
           }
         } else {
-          // Fallback générique
           buildLog += `🔄 Tentative build générique sans optimisations...\n`;
           try {
             const simpleBuildEnv = { NODE_ENV: "production" };
@@ -619,14 +585,14 @@ export default defineConfig({
 
     const sourceDir = path.join(deploymentDir, finalOutputDir);
 
-    // Essayer différents emplacements selon le framework
+    // Essayer différents emplacements
     const possibleDirs = [
       sourceDir,
-      path.join(deploymentDir, "build"), // React CRA
-      path.join(deploymentDir, "dist"), // Vue, Vite
-      path.join(deploymentDir, "out"), // Next.js
-      path.join(deploymentDir, "public"), // Fallback
-      deploymentDir, // Dernier recours
+      path.join(deploymentDir, "build"),
+      path.join(deploymentDir, "dist"),
+      path.join(deploymentDir, "out"),
+      path.join(deploymentDir, "public"),
+      deploymentDir,
     ];
 
     let foundSourceDir = null;
@@ -658,7 +624,7 @@ export default defineConfig({
       );
     }
 
-    // Copier les fichiers
+    // Copier les fichiers vers le volume Docker
     try {
       buildLog += `📋 Contenu à copier depuis ${foundSourceDir.replace(
         deploymentDir,
@@ -674,7 +640,7 @@ export default defineConfig({
       await execCommand(
         `cp -r "${foundSourceDir}/"* "${outputDir}/" 2>/dev/null || true`
       );
-      buildLog += `✅ Fichiers copiés vers le serveur statique\n`;
+      buildLog += `✅ Fichiers copiés vers /var/www/deployed/${subdomain}\n`;
 
       // Vérifier que les fichiers ont été copiés
       const copiedFiles = await fs.readdir(outputDir);
@@ -704,14 +670,11 @@ export default defineConfig({
         let htmlContent = await fs.readFile(htmlPath, "utf8");
         const originalContent = htmlContent;
 
-        // Corrections des chemins selon le framework
         if (primaryFramework?.name === "vue") {
-          // Vue utilise souvent /assets/
           htmlContent = htmlContent
             .replace(/href="\/assets\//g, 'href="./assets/')
             .replace(/src="\/assets\//g, 'src="./assets/');
         } else if (primaryFramework?.name === "react") {
-          // React CRA utilise /static/
           htmlContent = htmlContent
             .replace(/href="\/static\//g, 'href="./static/')
             .replace(/src="\/static\//g, 'src="./static/')
@@ -719,7 +682,6 @@ export default defineConfig({
             .replace(/src="\/assets\//g, 'src="./assets/');
         }
 
-        // Corrections génériques
         htmlContent = htmlContent
           .replace(/href="\//g, 'href="./')
           .replace(/src="\//g, 'src="./');
@@ -733,15 +695,13 @@ export default defineConfig({
       buildLog += `⚠️ Impossible de corriger les chemins HTML: ${fixError.message}\n`;
     }
 
-    // Configuration du domaine
+    // ==================== CONFIGURATION DU DOMAINE ====================
     await supabase
       .from("deployments")
       .update({ status: "configuring", build_log: buildLog })
       .eq("id", deploymentId);
 
-    const domain = `${project.name
-      .toLowerCase()
-      .replace(/[^a-z0-9]/g, "-")}.madahost.me`;
+    const domain = `${subdomain}.madahost.me`;
 
     await supabase
       .from("projects")
@@ -763,7 +723,7 @@ export default defineConfig({
     }
 
     buildLog += `✅ [${new Date().toISOString()}] Déploiement réussi!\n`;
-    buildLog += `🌐 Site disponible: http://localhost:3002/project/${project.id}/\n`;
+    buildLog += `🌐 Site disponible: https://${domain}\n`;
     if (primaryFramework) {
       buildLog += `🎯 Framework déployé: ${primaryFramework.name}\n`;
     }
@@ -793,7 +753,6 @@ export default defineConfig({
     let finalLog = buildLog || "";
     finalLog += `❌ [${new Date().toISOString()}] Erreur: ${error.message}\n`;
 
-    // Informations de debug en cas d'erreur
     if (primaryFramework) {
       finalLog += `🔍 Framework détecté: ${primaryFramework.name}\n`;
       finalLog += `🔍 Config utilisée: ${JSON.stringify(
@@ -821,7 +780,8 @@ export default defineConfig({
   }
 }
 
-// Fonction utilitaire pour mettre à jour les logs
+// ==================== FONCTIONS UTILITAIRES ====================
+
 async function updateDeploymentLog(deploymentId, buildLog) {
   try {
     await supabase
@@ -838,6 +798,7 @@ function execCommand(command, envVars = {}, timeout = 300000) {
     const options = {
       timeout,
       env: { ...process.env, ...envVars },
+      maxBuffer: 10 * 1024 * 1024, // 10MB buffer
     };
 
     exec(command, options, (error, stdout, stderr) => {
