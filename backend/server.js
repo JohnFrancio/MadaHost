@@ -17,14 +17,25 @@ const PORT = process.env.PORT || 3001;
 
 // Configuration CORS - VERSION CORRIGÉE
 const corsOptions = {
-  origin: [
-    "https://madahost.me",
-    "https://www.madahost.me",
-    "http://localhost:5173",
-    "http://localhost:3000",
-  ],
-  credentials: true, // ⚠️ CRUCIAL
-  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+  origin: function (origin, callback) {
+    const allowedOrigins = ["https://madahost.me", "https://www.madahost.me"];
+
+    // En développement, autoriser localhost
+    if (process.env.NODE_ENV !== "production") {
+      allowedOrigins.push("http://localhost:5173", "http://localhost:3000");
+    }
+
+    // Autoriser les requêtes sans origine (Postman, curl) ou origines autorisées
+    if (!origin || allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      console.warn(`❌ Origine non autorisée: ${origin}`);
+      callback(new Error("Non autorisé par CORS"));
+    }
+  },
+  credentials: true,
+  optionsSuccessStatus: 200,
+  methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
   allowedHeaders: [
     "Content-Type",
     "Authorization",
@@ -32,6 +43,8 @@ const corsOptions = {
     "X-Requested-With",
   ],
   exposedHeaders: ["Set-Cookie"],
+  preflightContinue: false,
+  maxAge: 86400, // 24 heures
 };
 
 // IMPORTANT: Appliquer CORS AVANT les autres middlewares
