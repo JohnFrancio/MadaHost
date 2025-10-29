@@ -15,25 +15,21 @@ const { serve, setup } = require("./src/config/swagger");
 const app = express();
 const PORT = process.env.PORT || 3001;
 
-// Configuration CORS améliorée AVEC WebSocket
+// Configuration CORS - VERSION CORRIGÉE
 const corsOptions = {
   origin: function (origin, callback) {
-    // Liste des origines autorisées
-    const allowedOrigins = [
-      process.env.FRONTEND_URL || "https://madahost.me",
-      "https://madahost.me",
-      "https://www.madahost.me",
-    ];
+    const allowedOrigins = ["https://madahost.me", "https://www.madahost.me"];
 
     // En développement, autoriser localhost
     if (process.env.NODE_ENV !== "production") {
       allowedOrigins.push("http://localhost:5173", "http://localhost:3000");
     }
 
-    // Autoriser les requêtes sans origine (ex: Postman, curl)
+    // Autoriser les requêtes sans origine (Postman, curl) ou origines autorisées
     if (!origin || allowedOrigins.includes(origin)) {
       callback(null, true);
     } else {
+      console.warn(`❌ Origine non autorisée: ${origin}`);
       callback(new Error("Non autorisé par CORS"));
     }
   },
@@ -50,6 +46,12 @@ const corsOptions = {
   preflightContinue: false,
   maxAge: 86400, // 24 heures
 };
+
+// IMPORTANT: Appliquer CORS AVANT les autres middlewares
+app.use(cors(corsOptions));
+
+// Handler explicite pour les requêtes OPTIONS
+app.options("*", cors(corsOptions));
 
 // Middlewares de sécurité MODIFIÉS pour WebSocket
 app.use(
@@ -79,6 +81,34 @@ app.use(
   })
 );
 
+app.use((req, res, next) => {
+  const origin = req.headers.origin;
+  const allowedOrigins = ["https://madahost.me", "https://www.madahost.me"];
+
+  if (
+    allowedOrigins.includes(origin) ||
+    process.env.NODE_ENV !== "production"
+  ) {
+    res.header("Access-Control-Allow-Origin", origin);
+    res.header("Access-Control-Allow-Credentials", "true");
+    res.header(
+      "Access-Control-Allow-Methods",
+      "GET, POST, PUT, DELETE, PATCH, OPTIONS"
+    );
+    res.header(
+      "Access-Control-Allow-Headers",
+      "Content-Type, Authorization, Cookie, X-Requested-With"
+    );
+  }
+
+  // Répondre immédiatement aux requêtes OPTIONS
+  if (req.method === "OPTIONS") {
+    return res.sendStatus(200);
+  }
+
+  next();
+});
+
 app.use(cors(corsOptions));
 app.options("*", cors(corsOptions));
 app.use(morgan("combined"));
@@ -95,11 +125,11 @@ app.use(
       secure: process.env.NODE_ENV === "production", // true en production
       httpOnly: true,
       maxAge: 24 * 60 * 60 * 1000, // 24 heures
-      sameSite: "lax", // IMPORTANT : "lax" pour OAuth (pas "none")
-      domain: process.env.COOKIE_DOMAIN || undefined, // .madahost.me en production
+      sameSite: "lax", // IMPORTANT: "lax" pour OAuth
+      domain: process.env.COOKIE_DOMAIN || undefined, // .madahost.me
     },
     name: "madahost.sid",
-    proxy: process.env.NODE_ENV === "production", // Important pour HTTPS derrière proxy
+    proxy: process.env.NODE_ENV === "production", // Important pour HTTPS
   })
 );
 

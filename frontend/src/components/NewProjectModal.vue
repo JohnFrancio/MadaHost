@@ -183,7 +183,7 @@ const createProject = async () => {
     };
 
     const api = axios.create({
-      baseURL: import.meta.env.VITE_API_URL || "http://localhost:3001/api",
+      baseURL: import.meta.env.VITE_API_URL || "https://api.madahost.me/api",
       withCredentials: true,
     });
 
@@ -255,7 +255,7 @@ const deployNow = () => {
 
     // Appeler l'API de déploiement
     const api = axios.create({
-      baseURL: import.meta.env.VITE_API_URL || "http://localhost:3001/api",
+      baseURL: import.meta.env.VITE_API_URL || "https://api.madahost.me/api",
       withCredentials: true,
     });
 
