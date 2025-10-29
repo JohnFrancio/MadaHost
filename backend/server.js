@@ -65,12 +65,14 @@ app.use(
     resave: false,
     saveUninitialized: false,
     cookie: {
-      secure: process.env.NODE_ENV === "production",
+      secure: process.env.NODE_ENV === "production", // true en production
       httpOnly: true,
       maxAge: 24 * 60 * 60 * 1000, // 24 heures
-      sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
+      sameSite: "lax", // IMPORTANT : "lax" pour OAuth (pas "none")
+      domain: process.env.COOKIE_DOMAIN || undefined, // .madahost.me en production
     },
     name: "madahost.sid",
+    proxy: process.env.NODE_ENV === "production", // Important pour HTTPS derrière proxy
   })
 );
 
