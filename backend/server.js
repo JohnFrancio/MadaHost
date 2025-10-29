@@ -17,25 +17,14 @@ const PORT = process.env.PORT || 3001;
 
 // Configuration CORS - VERSION CORRIGÉE
 const corsOptions = {
-  origin: function (origin, callback) {
-    const allowedOrigins = ["https://madahost.me", "https://www.madahost.me"];
-
-    // En développement, autoriser localhost
-    if (process.env.NODE_ENV !== "production") {
-      allowedOrigins.push("http://localhost:5173", "http://localhost:3000");
-    }
-
-    // Autoriser les requêtes sans origine (Postman, curl) ou origines autorisées
-    if (!origin || allowedOrigins.includes(origin)) {
-      callback(null, true);
-    } else {
-      console.warn(`❌ Origine non autorisée: ${origin}`);
-      callback(new Error("Non autorisé par CORS"));
-    }
-  },
-  credentials: true,
-  optionsSuccessStatus: 200,
-  methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+  origin: [
+    "https://madahost.me",
+    "https://www.madahost.me",
+    "http://localhost:5173",
+    "http://localhost:3000",
+  ],
+  credentials: true, // ⚠️ CRUCIAL
+  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
   allowedHeaders: [
     "Content-Type",
     "Authorization",
@@ -43,8 +32,6 @@ const corsOptions = {
     "X-Requested-With",
   ],
   exposedHeaders: ["Set-Cookie"],
-  preflightContinue: false,
-  maxAge: 86400, // 24 heures
 };
 
 // IMPORTANT: Appliquer CORS AVANT les autres middlewares
@@ -116,20 +103,21 @@ app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true }));
 
 // Configuration des sessions sécurisées
+// Configuration des sessions
 app.use(
   session({
-    secret: process.env.SESSION_SECRET || "your-secret-key",
+    secret: process.env.SESSION_SECRET || "votre-secret-super-securise",
     resave: false,
     saveUninitialized: false,
+    name: "madahost.session", // Nom explicite
     cookie: {
-      secure: process.env.NODE_ENV === "production", // true en production
+      secure: true, // HTTPS obligatoire en prod
       httpOnly: true,
-      maxAge: 24 * 60 * 60 * 1000, // 24 heures
-      sameSite: "lax", // IMPORTANT: "lax" pour OAuth
-      domain: process.env.COOKIE_DOMAIN || undefined, // .madahost.me
+      maxAge: 7 * 24 * 60 * 60 * 1000, // 7 jours
+      sameSite: "none", // ⚠️ CRUCIAL pour cross-domain
+      domain: ".madahost.me", // ⚠️ CRUCIAL : partage entre api.madahost.me et madahost.me
     },
-    name: "madahost.sid",
-    proxy: process.env.NODE_ENV === "production", // Important pour HTTPS
+    store: null, // Vous pourriez ajouter Redis ici pour la prod
   })
 );
 
