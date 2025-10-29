@@ -116,21 +116,20 @@ app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true }));
 
 // Configuration des sessions sécurisées
-// Configuration des sessions
 app.use(
   session({
-    secret: process.env.SESSION_SECRET || "votre-secret-super-securise",
+    secret: process.env.SESSION_SECRET || "your-secret-key",
     resave: false,
     saveUninitialized: false,
-    name: "madahost.session", // Nom explicite
     cookie: {
-      secure: true, // HTTPS obligatoire en prod
+      secure: process.env.NODE_ENV === "production", // true en production
       httpOnly: true,
-      maxAge: 7 * 24 * 60 * 60 * 1000, // 7 jours
-      sameSite: "none", // ⚠️ CRUCIAL pour cross-domain
-      domain: ".madahost.me", // ⚠️ CRUCIAL : partage entre api.madahost.me et madahost.me
+      maxAge: 24 * 60 * 60 * 1000, // 24 heures
+      sameSite: "lax", // IMPORTANT: "lax" pour OAuth
+      domain: process.env.COOKIE_DOMAIN || undefined, // .madahost.me
     },
-    store: null, // Vous pourriez ajouter Redis ici pour la prod
+    name: "madahost.sid",
+    proxy: process.env.NODE_ENV === "production", // Important pour HTTPS
   })
 );
 
