@@ -17,12 +17,38 @@ const PORT = process.env.PORT || 3001;
 
 // Configuration CORS améliorée AVEC WebSocket
 const corsOptions = {
-  origin: process.env.FRONTEND_URL || "https://madahost.me",
+  origin: function (origin, callback) {
+    // Liste des origines autorisées
+    const allowedOrigins = [
+      process.env.FRONTEND_URL || "https://madahost.me",
+      "https://madahost.me",
+      "https://www.madahost.me",
+    ];
+
+    // En développement, autoriser localhost
+    if (process.env.NODE_ENV !== "production") {
+      allowedOrigins.push("http://localhost:5173", "http://localhost:3000");
+    }
+
+    // Autoriser les requêtes sans origine (ex: Postman, curl)
+    if (!origin || allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error("Non autorisé par CORS"));
+    }
+  },
   credentials: true,
   optionsSuccessStatus: 200,
   methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization", "Cookie"],
+  allowedHeaders: [
+    "Content-Type",
+    "Authorization",
+    "Cookie",
+    "X-Requested-With",
+  ],
+  exposedHeaders: ["Set-Cookie"],
   preflightContinue: false,
+  maxAge: 86400, // 24 heures
 };
 
 // Middlewares de sécurité MODIFIÉS pour WebSocket
@@ -54,6 +80,7 @@ app.use(
 );
 
 app.use(cors(corsOptions));
+app.options("*", cors(corsOptions));
 app.use(morgan("combined"));
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true }));
