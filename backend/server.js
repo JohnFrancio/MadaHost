@@ -17,11 +17,12 @@ const PORT = process.env.PORT || 3001;
 
 // Configuration CORS améliorée AVEC WebSocket
 const corsOptions = {
-  origin: process.env.FRONTEND_URL || "http://localhost:5173",
+  origin: process.env.FRONTEND_URL || "https://madahost.me",
   credentials: true,
   optionsSuccessStatus: 200,
   methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
   allowedHeaders: ["Content-Type", "Authorization", "Cookie"],
+  preflightContinue: false,
 };
 
 // Middlewares de sécurité MODIFIÉS pour WebSocket
