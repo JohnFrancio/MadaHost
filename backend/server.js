@@ -16,16 +16,51 @@ const app = express();
 const PORT = process.env.PORT || 3001;
 
 // Configuration CORS - VERSION CORRIGÉE
+// const corsOptions = {
+//   origin: function (origin, callback) {
+//     const allowedOrigins = ["https://madahost.me", "https://www.madahost.me"];
+
+//     // En développement, autoriser localhost
+//     if (process.env.NODE_ENV !== "production") {
+//       allowedOrigins.push("http://localhost:5173", "http://localhost:3000");
+//     }
+
+//     // Autoriser les requêtes sans origine (Postman, curl) ou origines autorisées
+//     if (!origin || allowedOrigins.includes(origin)) {
+//       callback(null, true);
+//     } else {
+//       console.warn(`❌ Origine non autorisée: ${origin}`);
+//       callback(new Error("Non autorisé par CORS"));
+//     }
+//   },
+//   credentials: true,
+//   optionsSuccessStatus: 200,
+//   methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+//   allowedHeaders: [
+//     "Content-Type",
+//     "Authorization",
+//     "Cookie",
+//     "X-Requested-With",
+//   ],
+//   exposedHeaders: ["Set-Cookie"],
+//   preflightContinue: false,
+//   maxAge: 86400, // 24 heures
+// };
 const corsOptions = {
   origin: function (origin, callback) {
-    const allowedOrigins = ["https://madahost.me", "https://www.madahost.me"];
+    const allowedOrigins = [
+      "https://madahost.me",
+      "https://www.madahost.me",
+      "http://localhost:5173",
+      "http://localhost:3000",
+    ];
 
-    // En développement, autoriser localhost
+    // En développement, autoriser toutes les origines
     if (process.env.NODE_ENV !== "production") {
-      allowedOrigins.push("http://localhost:5173", "http://localhost:3000");
+      return callback(null, true);
     }
 
-    // Autoriser les requêtes sans origine (Postman, curl) ou origines autorisées
+    // En production, vérifier les origines autorisées
     if (!origin || allowedOrigins.includes(origin)) {
       callback(null, true);
     } else {
@@ -34,52 +69,84 @@ const corsOptions = {
     }
   },
   credentials: true,
-  optionsSuccessStatus: 200,
   methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
-  allowedHeaders: [
-    "Content-Type",
-    "Authorization",
-    "Cookie",
-    "X-Requested-With",
-  ],
-  exposedHeaders: ["Set-Cookie"],
-  preflightContinue: false,
-  maxAge: 86400, // 24 heures
+  allowedHeaders: ["Content-Type", "Authorization", "Cookie"],
 };
 
 // IMPORTANT: Appliquer CORS AVANT les autres middlewares
 app.use(cors(corsOptions));
 
-// Handler explicite pour les requêtes OPTIONS
-app.options("*", cors(corsOptions));
-
-// Middlewares de sécurité MODIFIÉS pour WebSocket
+// Configuration Helmet pour production
 app.use(
   helmet({
     contentSecurityPolicy: {
       directives: {
         defaultSrc: ["'self'"],
-        styleSrc: ["'self'", "'unsafe-inline'"],
-        scriptSrc: ["'self'"],
-        imgSrc: [
-          "'self'",
-          "data:",
-          "https:",
-          "*.github.com",
-          "*.githubusercontent.com",
-        ],
-        // AJOUT IMPORTANT: autoriser les connexions WebSocket
+        styleSrc: ["'self'", "'unsafe-inline'", "https:"],
+        scriptSrc: ["'self'", "'unsafe-inline'"],
+        imgSrc: ["'self'", "data:", "https:"],
         connectSrc: [
           "'self'",
           "https://api.github.com",
-          "ws://localhost:3001",
-          "wss://localhost:3001",
+          "wss://madahost.me",
+          "ws://madahost.me",
         ],
       },
     },
     crossOriginEmbedderPolicy: false,
+    crossOriginResourcePolicy: { policy: "cross-origin" },
   })
 );
+
+// Configuration des sessions CORRIGÉE pour la production
+app.use(
+  session({
+    secret: process.env.SESSION_SECRET,
+    resave: false,
+    saveUninitialized: false,
+    cookie: {
+      secure: process.env.NODE_ENV === "production", // TRUE en production
+      httpOnly: true,
+      maxAge: 24 * 60 * 60 * 1000,
+      sameSite: "lax",
+      domain:
+        process.env.NODE_ENV === "production" ? ".madahost.me" : undefined,
+    },
+    name: "madahost.sid",
+    proxy: true, // IMPORTANT pour les reverse proxies
+  })
+);
+
+// Handler explicite pour les requêtes OPTIONS
+app.options("*", cors(corsOptions));
+
+// Middlewares de sécurité MODIFIÉS pour WebSocket
+// app.use(
+//   helmet({
+//     contentSecurityPolicy: {
+//       directives: {
+//         defaultSrc: ["'self'"],
+//         styleSrc: ["'self'", "'unsafe-inline'"],
+//         scriptSrc: ["'self'"],
+//         imgSrc: [
+//           "'self'",
+//           "data:",
+//           "https:",
+//           "*.github.com",
+//           "*.githubusercontent.com",
+//         ],
+//         // AJOUT IMPORTANT: autoriser les connexions WebSocket
+//         connectSrc: [
+//           "'self'",
+//           "https://api.github.com",
+//           "ws://localhost:3001",
+//           "wss://localhost:3001",
+//         ],
+//       },
+//     },
+//     crossOriginEmbedderPolicy: false,
+//   })
+// );
 
 app.use((req, res, next) => {
   const origin = req.headers.origin;
@@ -116,22 +183,22 @@ app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true }));
 
 // Configuration des sessions sécurisées
-app.use(
-  session({
-    secret: process.env.SESSION_SECRET || "your-secret-key",
-    resave: false,
-    saveUninitialized: false,
-    cookie: {
-      secure: process.env.NODE_ENV === "production", // true en production
-      httpOnly: true,
-      maxAge: 24 * 60 * 60 * 1000, // 24 heures
-      sameSite: "lax", // IMPORTANT: "lax" pour OAuth
-      domain: process.env.COOKIE_DOMAIN || undefined, // .madahost.me
-    },
-    name: "madahost.sid",
-    proxy: process.env.NODE_ENV === "production", // Important pour HTTPS
-  })
-);
+// app.use(
+//   session({
+//     secret: process.env.SESSION_SECRET || "your-secret-key",
+//     resave: false,
+//     saveUninitialized: false,
+//     cookie: {
+//       secure: process.env.NODE_ENV === "production", // true en production
+//       httpOnly: true,
+//       maxAge: 24 * 60 * 60 * 1000, // 24 heures
+//       sameSite: "lax", // IMPORTANT: "lax" pour OAuth
+//       domain: process.env.COOKIE_DOMAIN || undefined, // .madahost.me
+//     },
+//     name: "madahost.sid",
+//     proxy: process.env.NODE_ENV === "production", // Important pour HTTPS
+//   })
+// );
 
 // Configuration Passport
 app.use(passport.initialize());
