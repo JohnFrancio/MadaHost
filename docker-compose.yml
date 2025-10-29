@@ -1,0 +1,76 @@
+version: '3.8'
+
+services:
+  # Backend API
+  api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.prod
+    restart: always
+    container_name: madahost_api
+    environment:
+      - NODE_ENV=production
+      - PORT=3001
+    env_file:
+      - .env.production  # ⬅️ CHANGÉ : à la racine, pas dans backend/
+    volumes:
+      - ./backend/logs:/app/logs
+      - deployed_projects:/app/deployed_projects
+      - build_cache:/app/build_cache
+    networks:
+      - madahost_network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3001/api/health"]  # ⬅️ AJOUTÉ /api
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Frontend (build statique servi par Nginx)
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.prod
+      args:  # ⬅️ AJOUTÉ : passer l'URL de l'API
+        - VITE_API_URL=https://api.madahost.me/api
+    restart: always
+    container_name: madahost_frontend
+    networks:
+      - madahost_network
+
+  # Nginx Reverse Proxy
+  nginx:
+    image: nginx:alpine
+    restart: always
+    container_name: madahost_nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.prod.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/conf.d/madahost.conf:/etc/nginx/conf.d/madahost.conf:ro  # ⬅️ SPÉCIFIQUE
+      - /etc/letsencrypt:/etc/letsencrypt:ro  # ⬅️ CHANGÉ : certificats du VPS
+      - ./certbot/www:/var/www/certbot:ro
+      - deployed_projects:/var/www/deployed:ro
+      - nginx_cache:/var/cache/nginx
+    networks:
+      - madahost_network
+    depends_on:
+      - api
+      - frontend
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+volumes:
+  deployed_projects:
+    driver: local
+  build_cache:
+    driver: local
+  nginx_cache:
+    driver: local
+
+networks:
+  madahost_network:
+    driver: bridge
