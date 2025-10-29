@@ -3,7 +3,7 @@ import { ref, reactive, computed, onMounted, onUnmounted } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { useProjectsStore } from "@/stores/projects";
 import { useNotificationsStore } from "@/stores/notifications";
-import axios from "axios";
+import api from "@/utils/axios";
 import {
   ArrowLeftIcon,
   XCircleIcon,
@@ -86,11 +86,6 @@ const loadProject = async () => {
     loading.value = true;
     const projectId = route.params.id;
 
-    const api = axios.create({
-      baseURL: import.meta.env.VITE_API_URL || "http://localhost:3001/api",
-      withCredentials: true,
-    });
-
     const response = await api.get(`/projects/${projectId}`);
 
     if (response.data.success) {
@@ -117,10 +112,6 @@ const loadProject = async () => {
 const loadDeployments = async () => {
   try {
     deploymentsLoading.value = true;
-    const api = axios.create({
-      baseURL: import.meta.env.VITE_API_URL || "http://localhost:3001/api",
-      withCredentials: true,
-    });
 
     const response = await api.get(`/deployments/projects/${route.params.id}`);
 
@@ -136,11 +127,6 @@ const loadDeployments = async () => {
 
 const loadDeploymentStats = async () => {
   try {
-    const api = axios.create({
-      baseURL: import.meta.env.VITE_API_URL || "http://localhost:3001/api",
-      withCredentials: true,
-    });
-
     const response = await api.get("/deployments/stats");
 
     if (response.data.success) {
@@ -168,11 +154,6 @@ const checkCurrentDeployment = async () => {
 const deployProject = async () => {
   try {
     isDeploying.value = true;
-
-    const api = axios.create({
-      baseURL: import.meta.env.VITE_API_URL || "http://localhost:3001/api",
-      withCredentials: true,
-    });
 
     const response = await api.post(`/deployments/deploy/${route.params.id}`);
 
@@ -202,11 +183,6 @@ const startDeploymentPolling = () => {
     if (!currentDeployment.value) return;
 
     try {
-      const api = axios.create({
-        baseURL: import.meta.env.VITE_API_URL || "http://localhost:3001/api",
-        withCredentials: true,
-      });
-
       const response = await api.get(
         `/deployments/${currentDeployment.value.id}`
       );
@@ -249,11 +225,6 @@ const startDeploymentPolling = () => {
     if (!currentDeployment.value) return;
 
     try {
-      const api = axios.create({
-        baseURL: import.meta.env.VITE_API_URL || "http://localhost:3001/api",
-        withCredentials: true,
-      });
-
       const response = await api.get(
         `/deployments/${currentDeployment.value.id}/logs`
       );
@@ -271,11 +242,6 @@ const cancelDeployment = async () => {
   if (!currentDeployment.value) return;
 
   try {
-    const api = axios.create({
-      baseURL: import.meta.env.VITE_API_URL || "http://localhost:3001/api",
-      withCredentials: true,
-    });
-
     await api.delete(`/deployments/${currentDeployment.value.id}`);
 
     notifications.info("Déploiement annulé");
