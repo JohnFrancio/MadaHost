@@ -92,8 +92,6 @@ const initRedis = async () => {
   }
 };
 
-const PORT = process.env.PORT || 3001;
-
 // ========================================
 // Configuration CORS
 // ========================================
