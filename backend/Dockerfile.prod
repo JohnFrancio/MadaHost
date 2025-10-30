@@ -1,36 +1,34 @@
-# backend/Dockerfile.prod - VERSION CORRIGÉE
+# backend/Dockerfile.prod - VERSION STABLE
 FROM node:18-alpine
 
-# ✅ INSTALLER LES OUTILS SANS METTRE À JOUR NPM (garder la version compatible)
+# ✅ INSTALLATION STABLE SANS CONFLITS
 RUN apk add --no-cache \
     git \
     bash \
     python3 \
     make \
-    g++ \
-    && npm cache clean --force
+    g++
 
 WORKDIR /backend
 
 # Copier package files
 COPY package*.json ./
 
-# Installer les dépendances
+# Installer les dépendances AVANT de copier le code
 RUN npm ci --only=production --no-audit --no-fund
 
 # Copier le code source
 COPY . .
 
-# ✅ CRÉER LES DOSSIERS AVEC PERMISSIONS
+# ✅ CRÉER LES DOSSIERS AVEC L'UTILISATEUR CORRECT
+USER root
 RUN mkdir -p /var/www/deployed /backend/temp /backend/builds /backend/public /backend/logs \
     && chown -R node:node /var/www/deployed /backend/temp /backend/builds /backend/public /backend/logs \
     && chmod -R 755 /var/www/deployed /backend/temp /backend/builds /backend/public
+USER node
 
 # Exposer le port
 EXPOSE 3001
-
-# ✅ CHANGER VERS L'UTILISATEUR NON-ROOT
-USER node
 
 # Démarrer le serveur
 CMD ["node", "server.js"]
