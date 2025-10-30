@@ -524,6 +524,7 @@ async function deployProject(deploymentId, project) {
     }
 
     // ==================== INSTALLATION DES DÉPENDANCES ====================
+    // ==================== INSTALLATION DES DÉPENDANCES ====================
     await supabase
       .from("deployments")
       .update({ status: "building", build_log: buildLog })
@@ -544,11 +545,17 @@ async function deployProject(deploymentId, project) {
       );
       buildLog += `✅ Dépendances installées avec succès\n`;
 
-      // ✅ Vérification que Vite est bien installé
-      if (
-        primaryFramework?.name === "react" ||
-        primaryFramework?.name === "vue"
-      ) {
+      // ✅ CORRECTION : Vérifier si le projet UTILISE Vite
+      const packageJson = JSON.parse(
+        await fs.readFile(packageJsonPath, "utf8")
+      );
+      const allDeps = {
+        ...packageJson.dependencies,
+        ...packageJson.devDependencies,
+      };
+
+      // Vérifier Vite seulement s'il est déclaré dans le package.json
+      if (allDeps["vite"]) {
         try {
           const vitePath = path.join(deploymentDir, "node_modules", "vite");
           await fs.access(vitePath);
@@ -564,8 +571,25 @@ async function deployProject(deploymentId, project) {
           await fs.access(viteBinPath);
           buildLog += `✅ Binaire Vite disponible\n`;
         } catch {
-          buildLog += `❌ ERREUR: Vite non trouvé après installation!\n`;
-          throw new Error("Vite n'a pas été installé correctement");
+          buildLog += `⚠️ Vite déclaré mais non installé, ajout automatique...\n`;
+
+          // Installer Vite explicitement
+          await execCommand(
+            `cd ${deploymentDir} && npm install --save-dev vite@latest`,
+            {},
+            180000
+          );
+          buildLog += `✅ Vite installé manuellement\n`;
+        }
+      } else {
+        // Projet sans Vite (Create React App, etc.)
+        buildLog += `ℹ️  Projet sans Vite (probablement Create React App ou autre)\n`;
+
+        // Adapter la commande de build si nécessaire
+        if (packageJson.scripts?.build?.includes("react-scripts")) {
+          finalBuildCommand = "npm run build";
+          finalOutputDir = "build"; // CRA utilise "build" pas "dist"
+          buildLog += `🔧 Détection Create React App - Output dir: build\n`;
         }
       }
 
