@@ -462,19 +462,64 @@ async function deployProject(deploymentId, project) {
     }
 
     // Setup des frameworks (mais pas pour Next.js !)
-    if (primaryFramework?.name !== "nextjs") {
-      const { buildLog: setupLog, missingDeps } =
-        await frameworkHandler.setupFrameworks(
-          deploymentDir,
-          detectedFrameworks,
-          buildLog
+    // ==================== MODIFICATION DU PACKAGE.JSON ====================
+    if (
+      primaryFramework?.name === "react" ||
+      primaryFramework?.name === "vue"
+    ) {
+      try {
+        const packageJsonPath = path.join(deploymentDir, "package.json");
+        const packageJson = JSON.parse(
+          await fs.readFile(packageJsonPath, "utf8")
         );
-      buildLog = setupLog;
 
-      if (missingDeps.length > 0) {
-        buildLog += `🔧 Nouvelles dépendances à installer: ${missingDeps.join(
-          ", "
-        )}\n`;
+        buildLog += `📋 [${new Date().toISOString()}] Vérification des dépendances...\n`;
+
+        const allDeps = {
+          ...packageJson.dependencies,
+          ...packageJson.devDependencies,
+        };
+
+        let modified = false;
+
+        // ✅ Ajouter Vite si manquant
+        if (!allDeps.vite) {
+          if (!packageJson.devDependencies) packageJson.devDependencies = {};
+          packageJson.devDependencies.vite = "^5.0.0";
+          modified = true;
+          buildLog += `➕ Ajout de Vite v5.0.0\n`;
+        }
+
+        // ✅ Ajouter le plugin React/Vue si manquant
+        if (
+          primaryFramework.name === "react" &&
+          !allDeps["@vitejs/plugin-react"]
+        ) {
+          packageJson.devDependencies["@vitejs/plugin-react"] = "^4.2.0";
+          modified = true;
+          buildLog += `➕ Ajout de @vitejs/plugin-react v4.2.0\n`;
+        } else if (
+          primaryFramework.name === "vue" &&
+          !allDeps["@vitejs/plugin-vue"]
+        ) {
+          packageJson.devDependencies["@vitejs/plugin-vue"] = "^5.0.0";
+          modified = true;
+          buildLog += `➕ Ajout de @vitejs/plugin-vue v5.0.0\n`;
+        }
+
+        if (modified) {
+          await fs.writeFile(
+            packageJsonPath,
+            JSON.stringify(packageJson, null, 2)
+          );
+          buildLog += `💾 package.json mis à jour\n`;
+        } else {
+          buildLog += `✅ Toutes les dépendances nécessaires sont présentes\n`;
+        }
+
+        await updateDeploymentLog(deploymentId, buildLog);
+      } catch (error) {
+        buildLog += `⚠️ Erreur modification package.json: ${error.message}\n`;
       }
     }
 
@@ -493,11 +538,41 @@ async function deployProject(deploymentId, project) {
       await updateDeploymentLog(deploymentId, buildLog);
 
       const installOutput = await execCommand(
-        `cd ${deploymentDir} && ${finalInstallCommand}`
+        `cd ${deploymentDir} && ${finalInstallCommand}`,
+        {},
+        300000 // 5 minutes
       );
       buildLog += `✅ Dépendances installées avec succès\n`;
+
+      // ✅ Vérification que Vite est bien installé
+      if (
+        primaryFramework?.name === "react" ||
+        primaryFramework?.name === "vue"
+      ) {
+        try {
+          const vitePath = path.join(deploymentDir, "node_modules", "vite");
+          await fs.access(vitePath);
+          buildLog += `✅ Vite correctement installé\n`;
+
+          // Vérifier le binaire
+          const viteBinPath = path.join(
+            deploymentDir,
+            "node_modules",
+            ".bin",
+            "vite"
+          );
+          await fs.access(viteBinPath);
+          buildLog += `✅ Binaire Vite disponible\n`;
+        } catch {
+          buildLog += `❌ ERREUR: Vite non trouvé après installation!\n`;
+          throw new Error("Vite n'a pas été installé correctement");
+        }
+      }
+
+      await updateDeploymentLog(deploymentId, buildLog);
     } catch (error) {
-      buildLog += `⚠️ Erreur installation: ${error.message}\n`;
+      buildLog += `❌ Erreur installation: ${error.message}\n`;
+      await updateDeploymentLog(deploymentId, buildLog);
       throw error;
     }
 
@@ -508,10 +583,14 @@ async function deployProject(deploymentId, project) {
       await updateDeploymentLog(deploymentId, buildLog);
 
       try {
+        // ✅ Ajouter node_modules/.bin au PATH
+        const nodeBinPath = path.join(deploymentDir, "node_modules", ".bin");
+
         let buildEnv = {
           NODE_ENV: "production",
           CI: "true",
           GENERATE_SOURCEMAP: "false",
+          PATH: `${nodeBinPath}:${process.env.PATH}`, // ✅ CRUCIAL
         };
 
         if (primaryFramework) {
@@ -520,13 +599,19 @@ async function deployProject(deploymentId, project) {
 
         const buildOutput = await execCommand(
           `cd ${deploymentDir} && ${finalBuildCommand}`,
-          buildEnv
+          buildEnv,
+          600000 // 10 minutes
         );
-        buildLog += `✅ Build réussi\n`;
+
+        buildLog += `✅ Build réussi avec ${
+          primaryFramework?.name || "configuration par défaut"
+        }\n`;
       } catch (buildError) {
-        buildLog += `❌ Build échoué: ${buildError.message}\n`;
+        buildLog += `⚠️ Build échoué: ${buildError.message}\n`;
         throw buildError;
       }
+    } else {
+      buildLog += `ℹ️ Aucune commande de build spécifiée\n`;
     }
 
     // ==================== DÉPLOIEMENT DES FICHIERS ====================
