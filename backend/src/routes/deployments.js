@@ -484,10 +484,14 @@ async function deployProject(deploymentId, project) {
       await updateDeploymentLog(deploymentId, buildLog);
 
       try {
+        // ✅ CORRECTION : Ajouter node_modules/.bin au PATH
+        const nodeBinPath = path.join(deploymentDir, "node_modules", ".bin");
+
         let buildEnv = {
           NODE_ENV: "production",
           CI: "true",
           GENERATE_SOURCEMAP: "false",
+          PATH: `${nodeBinPath}:${process.env.PATH}`, // ✅ CRUCIAL
         };
 
         if (primaryFramework) {
@@ -512,51 +516,38 @@ async function deployProject(deploymentId, project) {
       } catch (buildError) {
         buildLog += `⚠️ Build échoué: ${buildError.message}\n`;
 
-        // Stratégies de fallback
+        // Stratégies de fallback avec npx
         if (
-          primaryFramework?.name === "vue" &&
-          buildError.message.includes("terser")
+          primaryFramework?.name === "vue" ||
+          primaryFramework?.name === "react"
         ) {
-          buildLog += `🔄 Tentative build Vue sans minification...\n`;
+          buildLog += `🔄 Tentative build avec npx...\n`;
           try {
-            await execCommand(
-              `cd ${deploymentDir} && npm run build -- --mode production --minify false`
-            );
-            buildLog += `✅ Build Vue réussi sans minification\n`;
-          } catch (fallbackError) {
-            buildLog += `❌ Fallback Vue échoué: ${fallbackError.message}\n`;
-            throw buildError;
-          }
-        } else if (
-          primaryFramework?.name === "react" &&
-          buildError.message.includes("terser")
-        ) {
-          buildLog += `🔄 Tentative build React avec config simplifiée...\n`;
-          try {
-            const viteConfigPath = path.join(deploymentDir, "vite.config.js");
-            const simpleConfig = `import { defineConfig } from 'vite'
-import react from '@vitejs/plugin-react'
+            const fallbackEnv = {
+              NODE_ENV: "production",
+              PATH: `${path.join(deploymentDir, "node_modules", ".bin")}:${
+                process.env.PATH
+              }`,
+            };
 
-export default defineConfig({
-  plugins: [react()],
-  base: './',
-  build: {
-    outDir: 'build',
-    minify: false,
-    sourcemap: false
-  }
-})`;
-            await fs.writeFile(viteConfigPath, simpleConfig);
-            await execCommand(`cd ${deploymentDir} && npm run build`);
-            buildLog += `✅ Build React réussi avec config simplifiée\n`;
+            await execCommand(
+              `cd ${deploymentDir} && npx vite build`,
+              fallbackEnv
+            );
+            buildLog += `✅ Build réussi avec npx\n`;
           } catch (fallbackError) {
-            buildLog += `❌ Fallback React échoué: ${fallbackError.message}\n`;
+            buildLog += `❌ Fallback npx échoué: ${fallbackError.message}\n`;
             throw buildError;
           }
         } else {
           buildLog += `🔄 Tentative build générique sans optimisations...\n`;
           try {
-            const simpleBuildEnv = { NODE_ENV: "production" };
+            const simpleBuildEnv = {
+              NODE_ENV: "production",
+              PATH: `${path.join(deploymentDir, "node_modules", ".bin")}:${
+                process.env.PATH
+              }`,
+            };
             await execCommand(
               `cd ${deploymentDir} && npm run build`,
               simpleBuildEnv

@@ -282,9 +282,17 @@ class BuildService {
   /**
    * Utilitaires
    */
+  // buildService.js - Méthode executeCommand (ligne ~300)
+
   async executeCommand(command, cwd, env = {}) {
     return new Promise((resolve, reject) => {
-      const childEnv = { ...process.env, ...env };
+      // ✅ CORRECTION : Ajouter node_modules/.bin au PATH
+      const nodeBinPath = path.join(cwd, "node_modules", ".bin");
+      const childEnv = {
+        ...process.env,
+        ...env,
+        PATH: `${nodeBinPath}:${process.env.PATH}`, // ✅ CRUCIAL
+      };
 
       const child = spawn("sh", ["-c", command], {
         cwd,

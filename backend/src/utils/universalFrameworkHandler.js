@@ -217,6 +217,19 @@ class UniversalFrameworkHandler {
         packageJson.devDependencies[dep] = latestVersions[dep] || "latest";
       }
 
+      // ✅ Corriger les scripts pour utiliser npx si nécessaire
+      if (!packageJson.scripts) packageJson.scripts = {};
+
+      if (frameworks.includes("react") || frameworks.includes("vue")) {
+        if (
+          !packageJson.scripts.build ||
+          packageJson.scripts.build === "vite build"
+        ) {
+          packageJson.scripts.build = "npx vite build";
+          buildLog += `🔧 Script build corrigé pour utiliser npx\n`;
+        }
+      }
+
       await fs.writeFile(packageJsonPath, JSON.stringify(packageJson, null, 2));
     }
 
