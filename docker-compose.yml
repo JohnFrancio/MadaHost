@@ -52,7 +52,7 @@ services:
 
 volumes:
   deployed_projects:
-    driver: local
+    /var/www/deployed 
   build_cache:
     driver: local
   nginx_cache:

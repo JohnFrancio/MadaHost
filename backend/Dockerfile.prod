@@ -1,8 +1,8 @@
 # backend/Dockerfile.prod
 FROM node:18-alpine
 
-# ✅ Installer Git (nécessaire pour cloner les repos)
-RUN apk add --no-cache git
+# ✅ Installer Git et autres outils nécessaires
+RUN apk add --no-cache git bash
 
 WORKDIR /backend
 

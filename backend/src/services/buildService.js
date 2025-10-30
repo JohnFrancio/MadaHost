@@ -3,24 +3,38 @@ const { execSync, spawn } = require("child_process");
 const fs = require("fs").promises;
 const path = require("path");
 const supabase = require("../config/supabase");
-const { createHash } = require("crypto");
 
 class BuildService {
   constructor() {
+    // ✅ Chemins cohérents avec le Dockerfile
     this.buildsDir = path.join(__dirname, "../../builds");
     this.publicDir = path.join(__dirname, "../../public");
     this.tempDir = path.join(__dirname, "../../temp");
+    this.deployedDir = "/var/www/deployed"; // ✅ Dossier partagé avec Nginx
 
     this.initDirectories();
   }
 
   async initDirectories() {
     try {
+      console.log("📁 Initialisation des dossiers...");
+
       await fs.mkdir(this.buildsDir, { recursive: true });
+      console.log(`✅ Créé: ${this.buildsDir}`);
+
       await fs.mkdir(this.publicDir, { recursive: true });
+      console.log(`✅ Créé: ${this.publicDir}`);
+
       await fs.mkdir(this.tempDir, { recursive: true });
+      console.log(`✅ Créé: ${this.tempDir}`);
+
+      await fs.mkdir(this.deployedDir, { recursive: true });
+      console.log(`✅ Créé: ${this.deployedDir}`);
+
+      console.log("✅ Tous les dossiers sont prêts");
     } catch (error) {
       console.error("❌ Erreur création dossiers:", error);
+      throw error;
     }
   }
 
@@ -56,13 +70,6 @@ class BuildService {
         "Déploiement des fichiers..."
       );
       const deployUrl = await this.deployFiles(project, buildOutput);
-
-      await this.updateDeploymentStatus(
-        deploymentId,
-        "configuring",
-        "Configuration du domaine..."
-      );
-      await this.configureNginx(project);
 
       await this.updateDeploymentStatus(
         deploymentId,
@@ -102,6 +109,11 @@ class BuildService {
     const buildPath = path.join(this.tempDir, `build-${deploymentId}`);
 
     try {
+      console.log(`📂 Création dossier: ${buildPath}`);
+
+      // Vérifier que le dossier temp existe
+      await fs.mkdir(this.tempDir, { recursive: true });
+
       // Récupérer le token GitHub de l'utilisateur
       const { data: user } = await supabase
         .from("users")
@@ -149,7 +161,7 @@ class BuildService {
 
     try {
       // Nettoyer le dossier de sortie
-      await fs.rmdir(outputPath, { recursive: true }).catch(() => {});
+      await fs.rm(outputPath, { recursive: true, force: true });
       await fs.mkdir(outputPath, { recursive: true });
 
       console.log(
@@ -213,11 +225,15 @@ class BuildService {
    * Déployer les fichiers vers le serveur web
    */
   async deployFiles(project, buildOutput) {
-    const webPath = path.join(this.publicDir, project.name);
+    // ✅ Utiliser le dossier partagé avec Nginx
+    const webPath = path.join(this.deployedDir, project.name);
 
     try {
+      console.log(`📋 Déploiement vers: ${webPath}`);
+
       // Nettoyer le dossier web
-      await fs.rmdir(webPath, { recursive: true }).catch(() => {});
+      await fs.rm(webPath, { recursive: true, force: true });
+      await fs.mkdir(webPath, { recursive: true });
 
       // Copier les fichiers buildés
       await this.copyDirectory(buildOutput, webPath);
@@ -264,97 +280,6 @@ class BuildService {
   }
 
   /**
-   * Configurer Nginx pour le nouveau site
-   */
-  async configureNginx(project) {
-    const siteName = project.name;
-    const domain = `${siteName}.madahost.me`;
-    const webRoot = path.join(this.publicDir, siteName);
-
-    // Configuration Nginx pour le site
-    const nginxConfig = `server {
-    listen 80;
-    listen 443 ssl http2;
-    server_name ${domain};
-
-    # SSL Configuration (si certificat disponible)
-    ssl_certificate /etc/ssl/certs/madahost.me.pem;
-    ssl_certificate_key /etc/ssl/private/madahost.me.key;
-    
-    # Security headers
-    add_header X-Frame-Options "SAMEORIGIN" always;
-    add_header X-XSS-Protection "1; mode=block" always;
-    add_header X-Content-Type-Options "nosniff" always;
-    
-    # Document root
-    root ${webRoot};
-    index index.html index.htm;
-    
-    # SPA fallback
-    location / {
-        try_files $uri $uri/ /index.html;
-    }
-    
-    # Cache static assets
-    location ~* \\.(js|css|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf|eot)$ {
-        expires 1y;
-        add_header Cache-Control "public, immutable";
-    }
-    
-    # Gzip compression
-    gzip on;
-    gzip_vary on;
-    gzip_types text/plain text/css text/xml text/javascript application/javascript application/xml+rss application/json;
-    
-    # Security
-    location ~ /\\. {
-        deny all;
-    }
-}`;
-
-    const configPath = `/etc/nginx/sites-available/${siteName}`;
-    const enabledPath = `/etc/nginx/sites-enabled/${siteName}`;
-
-    try {
-      // Écrire la configuration (nécessite les permissions)
-      console.log(`⚙️  Configuration Nginx: ${domain}`);
-
-      // En développement, juste logger la config
-      if (process.env.NODE_ENV !== "production") {
-        console.log("📝 Configuration Nginx (mode dev):");
-        console.log(nginxConfig);
-        return;
-      }
-
-      // En production, écrire vraiment les fichiers
-      await fs.writeFile(configPath, nginxConfig);
-
-      // Créer le lien symbolique
-      try {
-        await fs.unlink(enabledPath).catch(() => {});
-        await fs.symlink(configPath, enabledPath);
-      } catch (symlinkError) {
-        console.warn(
-          "⚠️  Impossible de créer le lien symbolique:",
-          symlinkError.message
-        );
-      }
-
-      // Tester et recharger Nginx
-      try {
-        execSync("nginx -t");
-        execSync("systemctl reload nginx");
-        console.log(`✅ Nginx configuré: ${domain}`);
-      } catch (nginxError) {
-        console.warn("⚠️  Impossible de recharger Nginx:", nginxError.message);
-      }
-    } catch (error) {
-      console.warn("⚠️  Configuration Nginx échouée:", error.message);
-      // Ne pas faire échouer le déploiement pour ça
-    }
-  }
-
-  /**
    * Utilitaires
    */
   async executeCommand(command, cwd, env = {}) {
@@ -397,36 +322,59 @@ class BuildService {
   }
 
   async copyDirectory(src, dest) {
-    const copyCmd = `cp -r "${src}"/* "${dest}"/`;
-    execSync(copyCmd);
-  }
+    const entries = await fs.readdir(src, { withFileTypes: true });
 
-  async copyStaticFiles(src, dest) {
-    // Copier les fichiers web courants
-    const extensions = [
-      "*.html",
-      "*.css",
-      "*.js",
-      "*.png",
-      "*.jpg",
-      "*.gif",
-      "*.ico",
-      "*.svg",
-    ];
+    for (const entry of entries) {
+      const srcPath = path.join(src, entry.name);
+      const destPath = path.join(dest, entry.name);
 
-    for (const ext of extensions) {
-      try {
-        const findCmd = `find "${src}" -name "${ext}" -exec cp {} "${dest}/" \\;`;
-        execSync(findCmd);
-      } catch {
-        // Ignorer si pas de fichiers trouvés
+      if (entry.isDirectory()) {
+        await fs.mkdir(destPath, { recursive: true });
+        await this.copyDirectory(srcPath, destPath);
+      } else {
+        await fs.copyFile(srcPath, destPath);
       }
     }
   }
 
+  async copyStaticFiles(src, dest) {
+    const extensions = [
+      ".html",
+      ".css",
+      ".js",
+      ".png",
+      ".jpg",
+      ".gif",
+      ".ico",
+      ".svg",
+    ];
+
+    const copyRecursive = async (dir) => {
+      const entries = await fs.readdir(dir, { withFileTypes: true });
+
+      for (const entry of entries) {
+        const srcPath = path.join(dir, entry.name);
+
+        if (entry.isDirectory()) {
+          await copyRecursive(srcPath);
+        } else {
+          const ext = path.extname(entry.name);
+          if (extensions.includes(ext)) {
+            const relativePath = path.relative(src, srcPath);
+            const destPath = path.join(dest, relativePath);
+            await fs.mkdir(path.dirname(destPath), { recursive: true });
+            await fs.copyFile(srcPath, destPath);
+          }
+        }
+      }
+    };
+
+    await copyRecursive(src);
+  }
+
   async cleanup(buildPath) {
     try {
-      await fs.rmdir(buildPath, { recursive: true });
+      await fs.rm(buildPath, { recursive: true, force: true });
       console.log(`🧹 Nettoyage: ${buildPath}`);
     } catch (error) {
       console.warn("⚠️  Nettoyage échoué:", error.message);
