@@ -1,10 +1,7 @@
 # backend/Dockerfile.prod
 FROM node:18-alpine
 
-WORKDIR /app
-
-# Installer git (nécessaire pour cloner les repos)
-RUN apk add --no-cache git
+WORKDIR /backend
 
 # Copier package files
 COPY package*.json ./
@@ -15,14 +12,14 @@ RUN npm ci --only=production
 # Copier le code source
 COPY . .
 
-# ✅ CRITIQUE: Créer les dossiers avec les bonnes permissions
+# ✅ CRITIQUE: Créer le dossier avec les bonnes permissions
 RUN mkdir -p /var/www/deployed && \
-    mkdir -p /app/temp && \
-    mkdir -p /app/logs && \
     chown -R node:node /var/www/deployed && \
-    chown -R node:node /app/temp && \
-    chown -R node:node /app && \
     chmod -R 755 /var/www/deployed
+
+# ✅ Créer aussi le dossier temp
+RUN mkdir -p /app/temp && \
+    chown -R node:node /app/temp
 
 # Exposer le port
 EXPOSE 3001
