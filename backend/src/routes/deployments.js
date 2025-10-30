@@ -587,101 +587,88 @@ export default defineConfig({
       }
     }
 
-    // ==================== INSTALLATION DES DÉPENDANCES ====================
-    // ==================== INSTALLATION DES DÉPENDANCES ====================
+    // ==================== INSTALLATION DES DÉPENDANCES - VERSION SIMPLIFIÉE ====================
     const packageJsonPath = path.join(deploymentDir, "package.json");
     try {
       await fs.access(packageJsonPath);
 
       buildLog += `📦 [${new Date().toISOString()}] Installation des dépendances...\n`;
 
-      // ✅ UTILISER NODE DIRECTEMENT - VERSION CORRIGÉE
+      // ✅ APPROCHE SIMPLE ET FIABLE
+      let installSuccessful = false;
+
+      // Essai 1: Installation normale
       try {
-        // Lire package.json
-        const packageJson = JSON.parse(
-          await fs.readFile(packageJsonPath, "utf8")
-        );
-        const allDeps = {
-          ...packageJson.dependencies,
-          ...packageJson.devDependencies,
-        };
-
-        buildLog += `🔧 Installation avec Node.js direct...\n`;
-
-        // ✅ SCRIPT D'INSTALLATION CORRIGÉ (syntaxe valide)
-        const installScript = `
-const { execSync } = require('child_process');
-const fs = require('fs');
-
-console.log('📦 Installation des dépendances...');
-
-// Créer node_modules si nécessaire
-if (!fs.existsSync('node_modules')) {
-  fs.mkdirSync('node_modules', { recursive: true });
-}
-
-// Installer les dépendances critiques une par une
-const deps = ${JSON.stringify(allDeps)};
-const criticalDeps = ['vite', 'react', 'react-dom', '@vitejs/plugin-react'];
-
-for (const dep of criticalDeps) {
-  if (deps[dep]) {
-    console.log('📦 Installing ' + dep);
-    try {
-      // ✅ COMMANDE SIMPLIFIÉE - plus d'échappement complexe
-      execSync(\`npm install \${dep}@\${deps[dep]} --no-save --no-audit --no-fund\`, {
-        stdio: 'inherit',
-        shell: true
-      });
-    } catch (e) {
-      console.log('⚠️ Failed to install ' + dep + ', trying yarn...');
-      try {
-        // Essayer avec yarn
-        execSync(\`yarn add \${dep}@\${deps[dep]} --dev\`, {
-          stdio: 'inherit',
-          shell: true
-        });
-      } catch (yarnError) {
-        console.log('❌ All installation methods failed for ' + dep);
-      }
-    }
-  }
-}
-
-console.log('✅ Installation terminée');
-`;
-
-        // Écrire et exécuter le script
-        const scriptPath = path.join(deploymentDir, "install.js");
-        await fs.writeFile(scriptPath, installScript);
-
+        buildLog += `🔧 Tentative avec npm standard...\n`;
         await execCommand(
-          `node install.js`,
+          "npm install --no-audit --no-fund",
           {},
           300000,
           deploymentDir,
           deploymentDir
         );
+        buildLog += `✅ Dépendances installées avec npm\n`;
+        installSuccessful = true;
+      } catch (npmError) {
+        buildLog += `❌ npm standard échoué: ${npmError.message}\n`;
+      }
 
-        buildLog += `✅ Dépendances installées avec Node.js\n`;
-      } catch (installError) {
-        buildLog += `❌ Installation échouée: ${installError.message}\n`;
-
-        // ✅ FALLBACK: Revenir à l'installation normale
-        buildLog += `🔄 Retour à l'installation normale avec npm...\n`;
+      // Essai 2: Installation des dépendances critiques seulement
+      if (!installSuccessful) {
         try {
-          await execCommand(
-            "npm install --no-audit --no-fund",
-            {},
-            300000,
-            deploymentDir,
-            deploymentDir
+          buildLog += `🔄 Installation des dépendances critiques...\n`;
+
+          const packageJson = JSON.parse(
+            await fs.readFile(packageJsonPath, "utf8")
           );
-          buildLog += `✅ Dépendances installées avec npm standard\n`;
-        } catch (npmError) {
-          buildLog += `❌ Toutes les méthodes d'installation ont échoué\n`;
-          throw installError;
+          const allDeps = {
+            ...packageJson.dependencies,
+            ...packageJson.devDependencies,
+          };
+
+          const criticalDeps = [
+            "vite",
+            "react",
+            "react-dom",
+            "@vitejs/plugin-react",
+          ];
+
+          for (const dep of criticalDeps) {
+            if (allDeps[dep]) {
+              buildLog += `📦 Installation de ${dep}...\n`;
+              await execCommand(
+                `npm install ${dep}@${allDeps[dep]} --no-save --no-audit --no-fund`,
+                {},
+                120000,
+                deploymentDir,
+                deploymentDir
+              );
+            }
+          }
+
+          buildLog += `✅ Dépendances critiques installées\n`;
+          installSuccessful = true;
+        } catch (criticalError) {
+          buildLog += `❌ Installation critique échouée: ${criticalError.message}\n`;
         }
+      }
+
+      if (!installSuccessful) {
+        throw new Error("Impossible d'installer les dépendances");
+      }
+
+      // Vérification finale
+      try {
+        const viteCheck = await execCommand(
+          'npx vite --version || echo "Vite non trouvé"',
+          {},
+          30000,
+          deploymentDir,
+          deploymentDir
+        );
+        buildLog += `🔍 Vérification Vite: ${viteCheck.trim()}\n`;
+      } catch (checkError) {
+        buildLog += `⚠️ Impossible de vérifier Vite: ${checkError.message}\n`;
       }
 
       await updateDeploymentLog(deploymentId, buildLog);
