@@ -588,144 +588,73 @@ export default defineConfig({
     }
 
     // ==================== INSTALLATION DES DÉPENDANCES ====================
+    // ==================== INSTALLATION DES DÉPENDANCES ====================
     const packageJsonPath = path.join(deploymentDir, "package.json");
     try {
       await fs.access(packageJsonPath);
 
       buildLog += `📦 [${new Date().toISOString()}] Installation des dépendances...\n`;
 
-      // ✅ UTILISER NODE DIRECTEMENT POUR ÉVITER NPM
+      // ✅ UTILISER NODE DIRECTEMENT - VERSION CORRIGÉE
       try {
         // Lire package.json
-        const packageJson = JSON.parse(await fs.readFile(packageJsonPath, "utf8"));
+        const packageJson = JSON.parse(
+          await fs.readFile(packageJsonPath, "utf8")
+        );
         const allDeps = {
           ...packageJson.dependencies,
-          ...packageJson.devDependencies
+          ...packageJson.devDependencies,
         };
 
         buildLog += `🔧 Installation avec Node.js direct...\n`;
 
-        // Créer un script d'installation minimal
+        // ✅ SCRIPT D'INSTALLATION CORRIGÉ (syntaxe valide)
         const installScript = `
-          const { execSync } = require('child_process');
-          const fs = require('fs');
-          
-          console.log('📦 Installation des dépendances...');
-          
-          // Créer node_modules si nécessaire
-          if (!fs.existsSync('node_modules')) {
-            fs.mkdirSync('node_modules', { recursive: true });
-          }
-          
-          // Installer les dépendances critiques une par une
-          const deps = ${JSON.stringify(allDeps)};
-          const criticalDeps = ['vite', 'react', 'react-dom', '@vitejs/plugin-react'];
-          
-          for (const dep of criticalDeps) {
-            if (deps[dep]) {
-              console.log('📦 Installing ' + dep);
-              try {
-                execSync('node -e "\\\\\\"require(\\\\\\\\\\\\\"child_process\\\\\\\\\\\\\").execSync(\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\`npm install ${dep}@${deps[dep]} --no-save\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\`, {stdio: \\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\'inherit\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\'})\\\\\\\""', { 
-                  stdio: 'inherit',
-                  shell: true 
-                });
-              } catch (e) {
-                console.log('⚠️ Failed to install ' + dep + ', trying alternative method');
-                // Méthode alternative
-                execSync('curl -s https://registry.npmjs.org/${dep} | node -e "\\\\\\"const data = JSON.parse(require(\\\\\\\\\\\\\"fs\\\\\\\\\\\\\").readFileSync(0, \\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\'utf8\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\')); console.log(data.versions[\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\'${deps[dep].replace(/^\\^/, \\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\'\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\')}\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\'].dist.tarball)\\\\\\\"" | xargs curl -s | tar -xz', {
-                  stdio: 'inherit',
-                  shell: true
-                });
-              }
-            }kageJsonPath = path.join(deploymentDir, "package.json");
+const { execSync } = require('child_process');
+const fs = require('fs');
+
+console.log('📦 Installation des dépendances...');
+
+// Créer node_modules si nécessaire
+if (!fs.existsSync('node_modules')) {
+  fs.mkdirSync('node_modules', { recursive: true });
+}
+
+// Installer les dépendances critiques une par une
+const deps = ${JSON.stringify(allDeps)};
+const criticalDeps = ['vite', 'react', 'react-dom', '@vitejs/plugin-react'];
+
+for (const dep of criticalDeps) {
+  if (deps[dep]) {
+    console.log('📦 Installing ' + dep);
     try {
-      await fs.access(packageJsonPath);
-
-      buildLog += `📦 [${new Date().toISOString()}] Installation des dépendances...\n`;
-
-      // ✅ UTILISER NODE DIRECTEMENT POUR ÉVITER NPM
+      // ✅ COMMANDE SIMPLIFIÉE - plus d'échappement complexe
+      execSync(\`npm install \${dep}@\${deps[dep]} --no-save --no-audit --no-fund\`, {
+        stdio: 'inherit',
+        shell: true
+      });
+    } catch (e) {
+      console.log('⚠️ Failed to install ' + dep + ', trying yarn...');
       try {
-        // Lire package.json
-        const packageJson = JSON.parse(await fs.readFile(packageJsonPath, "utf8"));
-        const allDeps = {
-          ...packageJson.dependencies,
-          ...packageJson.devDependencies
-        };
-
-        buildLog += `🔧 Installation avec Node.js direct...\n`;
-
-        // Créer un script d'installation minimal
-        const installScript = `
-          const { execSync } = require('child_process');
-          const fs = require('fs');
-          
-          console.log('📦 Installation des dépendances...');
-          
-          // Créer node_modules si nécessaire
-          if (!fs.existsSync('node_modules')) {
-            fs.mkdirSync('node_modules', { recursive: true });
-          }
-          
-          // Installer les dépendances critiques une par une
-          const deps = ${JSON.stringify(allDeps)};
-          const criticalDeps = ['vite', 'react', 'react-dom', '@vitejs/plugin-react'];
-          
-          for (const dep of criticalDeps) {
-            if (deps[dep]) {
-              console.log('📦 Installing ' + dep);
-              try {
-                execSync('node -e "\\\\\\"require(\\\\\\\\\\\\\"child_process\\\\\\\\\\\\\").execSync(\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\`npm install ${dep}@${deps[dep]} --no-save\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\`, {stdio: \\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\'inherit\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\'})\\\\\\\""', { 
-                  stdio: 'inherit',
-                  shell: true 
-                });
-              } catch (e) {
-                console.log('⚠️ Failed to install ' + dep + ', trying alternative method');
-                // Méthode alternative
-                execSync('curl -s https://registry.npmjs.org/${dep} | node -e "\\\\\\"const data = JSON.parse(require(\\\\\\\\\\\\\"fs\\\\\\\\\\\\\").readFileSync(0, \\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\'utf8\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\')); console.log(data.versions[\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\'${deps[dep].replace(/^\\^/, \\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\'\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\')}\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\'].dist.tarball)\\\\\\\"" | xargs curl -s | tar -xz', {
-                  stdio: 'inherit',
-                  shell: true
-                });
-              }
-            }
-          }
-          
-          console.log('✅ Installation terminée');
-        `;
-
-        // Écrire et exécuter le script
-        const scriptPath = path.join(deploymentDir, 'install.js');
-        await fs.writeFile(scriptPath, installScript);
-        
-        await execCommand(
-          `node install.js`,
-          {},
-          300000,
-          deploymentDir,
-          deploymentDir
-        );
-        
-        buildLog += `✅ Dépendances installées avec Node.js\n`;
-
-      } catch (installError) {
-        buildLog += `❌ Installation échouée: ${installError.message}\n`;
-        throw installError;
+        // Essayer avec yarn
+        execSync(\`yarn add \${dep}@\${deps[dep]} --dev\`, {
+          stdio: 'inherit',
+          shell: true
+        });
+      } catch (yarnError) {
+        console.log('❌ All installation methods failed for ' + dep);
       }
-
-      await updateDeploymentLog(deploymentId, buildLog);
-    } catch (error) {
-      buildLog += `❌ Erreur installation: ${error.message}\n`;
-      await updateDeploymentLog(deploymentId, buildLog);
-      throw error;
     }
-          }
-          
-          console.log('✅ Installation terminée');
-        `;
+  }
+}
+
+console.log('✅ Installation terminée');
+`;
 
         // Écrire et exécuter le script
-        const scriptPath = path.join(deploymentDir, 'install.js');
+        const scriptPath = path.join(deploymentDir, "install.js");
         await fs.writeFile(scriptPath, installScript);
-        
+
         await execCommand(
           `node install.js`,
           {},
@@ -733,12 +662,26 @@ export default defineConfig({
           deploymentDir,
           deploymentDir
         );
-        
-        buildLog += `✅ Dépendances installées avec Node.js\n`;
 
+        buildLog += `✅ Dépendances installées avec Node.js\n`;
       } catch (installError) {
         buildLog += `❌ Installation échouée: ${installError.message}\n`;
-        throw installError;
+
+        // ✅ FALLBACK: Revenir à l'installation normale
+        buildLog += `🔄 Retour à l'installation normale avec npm...\n`;
+        try {
+          await execCommand(
+            "npm install --no-audit --no-fund",
+            {},
+            300000,
+            deploymentDir,
+            deploymentDir
+          );
+          buildLog += `✅ Dépendances installées avec npm standard\n`;
+        } catch (npmError) {
+          buildLog += `❌ Toutes les méthodes d'installation ont échoué\n`;
+          throw installError;
+        }
       }
 
       await updateDeploymentLog(deploymentId, buildLog);
