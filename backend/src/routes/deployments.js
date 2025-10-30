@@ -327,290 +327,76 @@ router.delete("/:deploymentId", requireAuth, async (req, res) => {
   }
 });
 
-// ==================== FONCTION PRINCIPALE DE DÉPLOIEMENT ====================
-
 async function deployProject(deploymentId, project) {
-  let primaryFramework = null;
   let buildLog = "";
   const deploymentDir = path.join(__dirname, "../../temp", deploymentId);
+  const subdomain = project.name.toLowerCase().replace(/[^a-z0-9]/g, "-");
+  const outputDir = path.join("/var/www/deployed", subdomain);
 
   try {
-    console.log(
-      `🚀 Démarrage déploiement ${deploymentId} pour ${project.name}`
-    );
-
-    const subdomain = project.name.toLowerCase().replace(/[^a-z0-9]/g, "-");
-    const outputDir = path.join("/var/www/deployed", subdomain);
-
-    buildLog += `🚀 [${new Date().toISOString()}] Démarrage du déploiement...\n`;
-    buildLog += `📁 Dossier de sortie: ${outputDir}\n`;
-    await updateDeploymentLog(deploymentId, buildLog);
-
+    buildLog += `🚀 Déploiement de ${project.name}\n`;
     await fs.mkdir(deploymentDir, { recursive: true });
     await fs.mkdir(outputDir, { recursive: true });
 
+    // CLONAGE
     const { data: user } = await supabase
       .from("users")
       .select("access_token")
       .eq("id", project.user_id)
       .single();
 
-    if (!user?.access_token) {
-      throw new Error("Token GitHub manquant pour l'utilisateur");
-    }
+    await execCommand(
+      `git clone --depth 1 -b ${project.branch || "main"} https://${
+        user.access_token
+      }@github.com/${project.github_repo}.git ${deploymentDir}`
+    );
+    buildLog += `✅ Repository cloné\n`;
 
-    // ==================== CLONAGE ====================
-    buildLog += `📥 [${new Date().toISOString()}] Clonage de ${
-      project.github_repo
-    }...\n`;
-    await updateDeploymentLog(deploymentId, buildLog);
+    // INSTALLATION - CRITIQUE
+    buildLog += `📦 Installation des dépendances...\n`;
 
-    const cloneCommand = `git clone --depth 1 -b ${
-      project.branch || "main"
-    } https://${user.access_token}@github.com/${
-      project.github_repo
-    }.git ${deploymentDir}`;
-
-    await supabase
-      .from("deployments")
-      .update({ status: "cloning", build_log: buildLog })
-      .eq("id", deploymentId);
-
-    await execCommand(cloneCommand);
-    buildLog += `✅ Repository cloné avec succès\n`;
-
-    try {
-      const commitHash = await execCommand(
-        `cd ${deploymentDir} && git rev-parse HEAD`
-      );
-      await supabase
-        .from("deployments")
-        .update({ commit_hash: commitHash.trim() })
-        .eq("id", deploymentId);
-      buildLog += `📋 Commit: ${commitHash.trim().substring(0, 8)}\n`;
-    } catch (error) {
-      buildLog += `⚠️ Impossible de récupérer le commit hash\n`;
-    }
-
-    // ==================== DÉTECTION FRAMEWORKS ====================
-    buildLog += `🔍 [${new Date().toISOString()}] Détection des frameworks...\n`;
-    await updateDeploymentLog(deploymentId, buildLog);
-
-    const frameworkHandler = new UniversalFrameworkHandler();
-    const {
-      frameworks: detectedFrameworks,
-      configs: frameworkConfigs,
-      log: detectionLog,
-    } = await frameworkHandler.detectFrameworks(deploymentDir);
-    buildLog += detectionLog;
-
-    let finalBuildCommand = project.build_command;
-    let finalOutputDir = project.output_dir || "dist";
-    let finalInstallCommand = project.install_command || "npm install";
-
-    if (frameworkConfigs.length > 0) {
-      primaryFramework = frameworkConfigs[0];
-      buildLog += `🎯 Framework principal détecté: ${
-        primaryFramework.name
-      } (${Math.round(primaryFramework.confidence * 100)}%)\n`;
-
-      // ✅ CORRECTION: Utiliser les bonnes commandes selon le framework
-      if (primaryFramework.name === "nextjs") {
-        // Next.js utilise ses propres commandes
-        finalBuildCommand = "npm run build";
-        finalOutputDir = ".next"; // ou "out" si export statique
-        finalInstallCommand = "npm install";
-
-        buildLog += `📦 Next.js détecté - Configuration spéciale\n`;
-
-        // Vérifier si export statique est configuré
-        const packageJsonPath = path.join(deploymentDir, "package.json");
-        try {
-          const packageJson = JSON.parse(
-            await fs.readFile(packageJsonPath, "utf8")
-          );
-          if (packageJson.scripts?.export) {
-            finalBuildCommand = "npm run build && npm run export";
-            finalOutputDir = "out";
-            buildLog += `📤 Export statique Next.js configuré\n`;
-          }
-        } catch (e) {
-          buildLog += `⚠️ Impossible de vérifier l'export statique\n`;
-        }
-      } else {
-        // Pour les autres frameworks, utiliser la config détectée
-        if (
-          !project.build_command ||
-          project.build_command === "npm run build"
-        ) {
-          finalBuildCommand = primaryFramework.config.buildCommand;
-          buildLog += `🔧 Commande de build automatique: ${finalBuildCommand}\n`;
-        }
-
-        if (!project.output_dir || project.output_dir === "dist") {
-          finalOutputDir = primaryFramework.config.outputDir;
-          buildLog += `📁 Dossier de sortie automatique: ${finalOutputDir}\n`;
-        }
-
-        if (
-          !project.install_command ||
-          project.install_command === "npm install"
-        ) {
-          finalInstallCommand = primaryFramework.config.installCommand;
-        }
-      }
-    }
-
-    // Setup des frameworks (mais pas pour Next.js !)
-    if (primaryFramework?.name !== "nextjs") {
-      const { buildLog: setupLog, missingDeps } =
-        await frameworkHandler.setupFrameworks(
-          deploymentDir,
-          detectedFrameworks,
-          buildLog
-        );
-      buildLog = setupLog;
-
-      if (missingDeps.length > 0) {
-        buildLog += `🔧 Nouvelles dépendances à installer: ${missingDeps.join(
-          ", "
-        )}\n`;
-      }
-    }
-
-    // ==================== INSTALLATION DES DÉPENDANCES ====================
-    await supabase
-      .from("deployments")
-      .update({ status: "building", build_log: buildLog })
-      .eq("id", deploymentId);
-
+    // ✅ FORCER VITE DANS PACKAGE.JSON
     const packageJsonPath = path.join(deploymentDir, "package.json");
+    const packageJson = JSON.parse(await fs.readFile(packageJsonPath, "utf8"));
+
+    if (!packageJson.devDependencies) packageJson.devDependencies = {};
+    if (!packageJson.devDependencies.vite) {
+      packageJson.devDependencies.vite = "^5.2.0";
+      packageJson.devDependencies["@vitejs/plugin-react"] = "^4.3.0";
+      await fs.writeFile(packageJsonPath, JSON.stringify(packageJson, null, 2));
+      buildLog += `✅ Vite ajouté au package.json\n`;
+    }
+
+    // ✅ INSTALLATION COMPLÈTE
+    await execCommand(`cd ${deploymentDir} && npm install --legacy-peer-deps`);
+    buildLog += `✅ npm install terminé\n`;
+
+    // ✅ VÉRIFICATION VITE
     try {
-      await fs.access(packageJsonPath);
-
-      buildLog += `📦 [${new Date().toISOString()}] Installation des dépendances...\n`;
-      buildLog += `🔧 Commande d'installation: ${finalInstallCommand}\n`;
-      await updateDeploymentLog(deploymentId, buildLog);
-
-      const installOutput = await execCommand(
-        `cd ${deploymentDir} && ${finalInstallCommand}`
-      );
-      buildLog += `✅ Dépendances installées avec succès\n`;
-    } catch (error) {
-      buildLog += `⚠️ Erreur installation: ${error.message}\n`;
-      throw error;
-    }
-
-    // ==================== BUILD DU PROJET ====================
-    if (finalBuildCommand && finalBuildCommand !== "") {
-      buildLog += `🏗️ [${new Date().toISOString()}] Build du projet...\n`;
-      buildLog += `🔧 Commande de build: ${finalBuildCommand}\n`;
-      await updateDeploymentLog(deploymentId, buildLog);
-
-      try {
-        let buildEnv = {
-          NODE_ENV: "production",
-          CI: "true",
-          GENERATE_SOURCEMAP: "false",
-        };
-
-        if (primaryFramework) {
-          buildEnv = { ...buildEnv, ...primaryFramework.config.env };
-        }
-
-        const buildOutput = await execCommand(
-          `cd ${deploymentDir} && ${finalBuildCommand}`,
-          buildEnv
-        );
-        buildLog += `✅ Build réussi\n`;
-      } catch (buildError) {
-        buildLog += `❌ Build échoué: ${buildError.message}\n`;
-        throw buildError;
-      }
-    }
-
-    // ==================== DÉPLOIEMENT DES FICHIERS ====================
-    await supabase
-      .from("deployments")
-      .update({ status: "deploying", build_log: buildLog })
-      .eq("id", deploymentId);
-
-    buildLog += `📁 [${new Date().toISOString()}] Déploiement des fichiers...\n`;
-    buildLog += `🔍 Recherche du dossier de sortie: ${finalOutputDir}\n`;
-    await updateDeploymentLog(deploymentId, buildLog);
-
-    const sourceDir = path.join(deploymentDir, finalOutputDir);
-
-    const possibleDirs = [
-      sourceDir,
-      path.join(deploymentDir, "out"),
-      path.join(deploymentDir, ".next"),
-      path.join(deploymentDir, "build"),
-      path.join(deploymentDir, "dist"),
-      path.join(deploymentDir, "public"),
-      deploymentDir,
-    ];
-
-    let foundSourceDir = null;
-    for (const dir of possibleDirs) {
-      try {
-        await fs.access(dir);
-        const files = await fs.readdir(dir);
-        if (
-          files.includes("index.html") ||
-          files.some((f) => f.endsWith(".html"))
-        ) {
-          foundSourceDir = dir;
-          buildLog += `✅ Fichiers trouvés dans: ${dir.replace(
-            deploymentDir,
-            "."
-          )}\n`;
-          break;
-        }
-      } catch (error) {
-        continue;
-      }
-    }
-
-    if (!foundSourceDir) {
-      throw new Error(
-        `Aucun dossier de sortie trouvé. Vérifié: ${possibleDirs
-          .map((d) => d.replace(deploymentDir, "."))
-          .join(", ")}`
-      );
-    }
-
-    try {
-      buildLog += `📋 Copie depuis ${foundSourceDir.replace(
-        deploymentDir,
-        "."
-      )}\n`;
-
-      await execCommand(`rm -rf "${outputDir}"/*`);
+      await fs.access(path.join(deploymentDir, "node_modules/.bin/vite"));
+      buildLog += `✅ Vite installé\n`;
+    } catch {
+      buildLog += `⚠️ Vite manquant, réinstallation...\n`;
       await execCommand(
-        `cp -r "${foundSourceDir}/"* "${outputDir}/" 2>/dev/null || true`
+        `cd ${deploymentDir} && npm install vite@latest @vitejs/plugin-react@latest --save-dev --force`
       );
-      buildLog += `✅ Fichiers copiés vers ${outputDir}\n`;
-
-      const copiedFiles = await fs.readdir(outputDir);
-      buildLog += `📊 Fichiers copiés: ${copiedFiles.length} éléments\n`;
-
-      if (copiedFiles.includes("index.html")) {
-        buildLog += `✅ index.html trouvé\n`;
-      }
-    } catch (copyError) {
-      buildLog += `❌ Erreur copie: ${copyError.message}\n`;
-      throw copyError;
     }
 
-    // ==================== CONFIGURATION DU DOMAINE ====================
-    await supabase
-      .from("deployments")
-      .update({ status: "configuring", build_log: buildLog })
-      .eq("id", deploymentId);
+    // BUILD
+    buildLog += `🏗️ Build...\n`;
+    await execCommand(`cd ${deploymentDir} && npm run build`, {
+      NODE_ENV: "production",
+      CI: "true",
+    });
+    buildLog += `✅ Build réussi\n`;
 
+    // COPIE FICHIERS
+    const distDir = path.join(deploymentDir, "dist");
+    await execCommand(`cp -r "${distDir}/"* "${outputDir}/"`);
+    buildLog += `✅ Fichiers déployés\n`;
+
+    // SUCCÈS
     const domain = `${subdomain}.madahost.me`;
-
     await supabase
       .from("projects")
       .update({
@@ -619,12 +405,6 @@ async function deployProject(deploymentId, project) {
         last_deployed: new Date().toISOString(),
       })
       .eq("id", project.id);
-
-    buildLog += `✅ [${new Date().toISOString()}] Déploiement réussi!\n`;
-    buildLog += `🌐 Site disponible: https://${domain}\n`;
-    if (primaryFramework) {
-      buildLog += `🎯 Framework déployé: ${primaryFramework.name}\n`;
-    }
 
     await supabase
       .from("deployments")
@@ -635,75 +415,40 @@ async function deployProject(deploymentId, project) {
       })
       .eq("id", deploymentId);
 
-    setTimeout(async () => {
-      try {
-        await execCommand(`rm -rf ${deploymentDir}`);
-        console.log(`🧹 Nettoyage terminé: ${deploymentDir}`);
-      } catch (error) {
-        console.error("❌ Erreur nettoyage:", error);
-      }
-    }, 10000);
+    buildLog += `✅ Déploiement réussi: https://${domain}\n`;
   } catch (error) {
-    console.error(`❌ Erreur déploiement ${deploymentId}:`, error);
-
-    let finalLog = buildLog || "";
-    finalLog += `❌ [${new Date().toISOString()}] Erreur: ${error.message}\n`;
-
-    if (primaryFramework) {
-      finalLog += `🔍 Framework détecté: ${primaryFramework.name}\n`;
-      finalLog += `🔍 Config utilisée: ${JSON.stringify(
-        primaryFramework.config,
-        null,
-        2
-      )}\n`;
-    }
-
+    buildLog += `❌ Erreur: ${error.message}\n`;
     await supabase
       .from("deployments")
       .update({
         status: "failed",
-        build_log: finalLog,
+        build_log: buildLog,
         completed_at: new Date().toISOString(),
       })
       .eq("id", deploymentId);
-
-    try {
-      await execCommand(`rm -rf ${deploymentDir}`);
-    } catch (cleanupError) {
-      console.error("❌ Erreur nettoyage:", cleanupError);
-    }
   }
+
+  // Nettoyage
+  setTimeout(
+    () => execCommand(`rm -rf ${deploymentDir}`).catch(() => {}),
+    5000
+  );
 }
 
-// ==================== FONCTIONS UTILITAIRES ====================
-
-async function updateDeploymentLog(deploymentId, buildLog) {
-  try {
-    await supabase
-      .from("deployments")
-      .update({ build_log: buildLog })
-      .eq("id", deploymentId);
-  } catch (error) {
-    console.error("❌ Erreur mise à jour logs:", error);
-  }
-}
-
-function execCommand(command, envVars = {}, timeout = 300000) {
+function execCommand(command, envVars = {}) {
   return new Promise((resolve, reject) => {
-    const options = {
-      timeout,
-      env: { ...process.env, ...envVars },
-      maxBuffer: 10 * 1024 * 1024,
-    };
-
-    exec(command, options, (error, stdout, stderr) => {
-      if (error) {
-        const errorMessage = `Command: ${command}\nError: ${error.message}\nStdout: ${stdout}\nStderr: ${stderr}`;
-        reject(new Error(errorMessage));
-        return;
+    exec(
+      command,
+      {
+        timeout: 600000,
+        env: { ...process.env, ...envVars },
+        maxBuffer: 10 * 1024 * 1024,
+      },
+      (error, stdout, stderr) => {
+        if (error) reject(new Error(`${error.message}\n${stderr}`));
+        else resolve(stdout);
       }
-      resolve(stdout);
-    });
+    );
   });
 }
 
