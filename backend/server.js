@@ -1,4 +1,4 @@
-// backend/server.js - VERSION CORRIGÉE SANS displayName
+// backend/server.js - VERSION AVEC REDIS
 const express = require("express");
 const cors = require("cors");
 const helmet = require("helmet");
@@ -11,8 +11,63 @@ const WebSocketManager = require("./src/services/websocket");
 const { serve, setup } = require("./src/config/swagger");
 const supabase = require("./src/config/supabase");
 
+// ✅ Import Redis
+const RedisStore = require("connect-redis").default;
+const { createClient } = require("redis");
+
 const app = express();
 const PORT = process.env.PORT || 3001;
+
+// ========================================
+// ✅ Configuration Redis
+// ========================================
+let redisClient = null;
+let redisStore = null;
+
+const initRedis = async () => {
+  if (process.env.REDIS_URL) {
+    try {
+      redisClient = createClient({
+        url: process.env.REDIS_URL,
+        socket: {
+          reconnectStrategy: (retries) => Math.min(retries * 50, 500),
+        },
+      });
+
+      redisClient.on("error", (err) => {
+        console.error("❌ Redis Error:", err);
+      });
+
+      redisClient.on("connect", () => {
+        console.log("✅ Redis connecté");
+      });
+
+      redisClient.on("reconnecting", () => {
+        console.log("🔄 Redis reconnexion...");
+      });
+
+      await redisClient.connect();
+
+      redisStore = new RedisStore({
+        client: redisClient,
+        prefix: "madahost:sess:",
+        ttl: 86400, // 24 heures
+      });
+
+      console.log("🔴 Redis configuré pour les sessions");
+    } catch (error) {
+      console.error("❌ Erreur connexion Redis:", error);
+      console.warn("⚠️  Utilisation de MemoryStore (fallback)");
+    }
+  } else {
+    console.warn(
+      "⚠️  REDIS_URL non configuré, utilisation de MemoryStore (non recommandé en production)"
+    );
+  }
+};
+
+// Initialiser Redis avant de démarrer le serveur
+initRedis();
 
 // ========================================
 // Configuration CORS
@@ -84,46 +139,47 @@ app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true }));
 
 // ========================================
-// Configuration Session (AVANT Passport!)
+// ✅ Configuration Session AVEC Redis
 // ========================================
-app.use(
-  session({
-    secret: process.env.SESSION_SECRET || "your-secret-key",
-    resave: false,
-    saveUninitialized: false,
-    cookie: {
-      secure: process.env.NODE_ENV === "production",
-      httpOnly: true,
-      maxAge: 24 * 60 * 60 * 1000,
-      sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
-      domain:
-        process.env.NODE_ENV === "production" ? ".madahost.me" : undefined,
-      path: "/",
-    },
-    name: "madahost.sid",
-    proxy: true,
-    rolling: true,
-  })
-);
+const sessionConfig = {
+  secret: process.env.SESSION_SECRET || "your-secret-key",
+  resave: false,
+  saveUninitialized: false,
+  cookie: {
+    secure: process.env.NODE_ENV === "production",
+    httpOnly: true,
+    maxAge: 24 * 60 * 60 * 1000,
+    sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
+    domain: process.env.NODE_ENV === "production" ? ".madahost.me" : undefined,
+    path: "/",
+  },
+  name: "madahost.sid",
+  proxy: true,
+  rolling: true,
+};
+
+// ✅ Ajouter Redis store si disponible
+if (redisStore) {
+  sessionConfig.store = redisStore;
+}
+
+app.use(session(sessionConfig));
 
 // ========================================
-// ✅ CRITIQUE: Configuration Passport
+// Configuration Passport
 // ========================================
 app.use(passport.initialize());
 app.use(passport.session());
 
-// ✅ Sérialisation : Stocker seulement l'ID dans la session
 passport.serializeUser((user, done) => {
   console.log("📝 Sérialisation utilisateur:", user.id, user.username);
   done(null, user.id);
 });
 
-// ✅ Désérialisation : Récupérer l'utilisateur complet depuis la DB
 passport.deserializeUser(async (id, done) => {
   try {
     console.log("📖 Désérialisation utilisateur ID:", id);
 
-    // ✅ CORRECTION: Utiliser SEULEMENT les colonnes qui existent
     const { data: user, error } = await supabase
       .from("users")
       .select(
@@ -237,6 +293,7 @@ app.get("/health", (req, res) => {
     status: "OK",
     timestamp: new Date().toISOString(),
     environment: process.env.NODE_ENV || "development",
+    redis: redisClient?.isReady ? "connected" : "disconnected",
   });
 });
 
@@ -251,8 +308,13 @@ app.get("/api/health", (req, res) => {
       connected: !!req.user,
       user: req.user ? req.user.username : null,
       sessionId: req.sessionID,
+      store: redisStore ? "redis" : "memory",
     },
     websocket: WebSocketManager.getStats(),
+    redis: {
+      connected: redisClient?.isReady || false,
+      url: process.env.REDIS_URL ? "configured" : "not configured",
+    },
     config: {
       github: {
         clientId: !!process.env.GITHUB_CLIENT_ID,
@@ -274,7 +336,7 @@ app.get("/api/health", (req, res) => {
 });
 
 // ========================================
-// Route utilisateur (alternative à /auth/me)
+// Route utilisateur
 // ========================================
 app.get("/api/user", (req, res) => {
   console.log("\n🔍 Route /api/user appelée");
@@ -304,7 +366,7 @@ app.get("/api/user", (req, res) => {
     user: {
       id: req.user.id,
       username: req.user.username,
-      displayName: req.user.username, // ✅ Utiliser username comme displayName
+      displayName: req.user.username,
       email: req.user.email,
       avatar: req.user.avatar_url,
       githubId: req.user.github_id,
@@ -394,6 +456,14 @@ server.listen(PORT, async () => {
   console.log(
     `  - SameSite: ${process.env.NODE_ENV === "production" ? "none" : "lax"}`
   );
+
+  console.log("\n🔴 Session Store:");
+  console.log(`  - Type: ${redisStore ? "Redis" : "Memory (non recommandé)"}`);
+  if (redisClient) {
+    console.log(
+      `  - Redis: ${redisClient.isReady ? "✅ Connecté" : "❌ Déconnecté"}`
+    );
+  }
   console.log("");
 
   console.log("✅ Serveur prêt à recevoir les requêtes\n");
@@ -406,6 +476,13 @@ const gracefulShutdown = async () => {
   console.log("\n🛑 Arrêt des serveurs...");
   try {
     if (WebSocketManager) WebSocketManager.close();
+
+    // Fermer Redis proprement
+    if (redisClient) {
+      await redisClient.quit();
+      console.log("✅ Redis déconnecté");
+    }
+
     server.close((err) => {
       if (err) {
         console.error("❌ Erreur fermeture:", err);

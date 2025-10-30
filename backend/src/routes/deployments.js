@@ -334,6 +334,7 @@ router.delete("/:deploymentId", requireAuth, async (req, res) => {
 
 async function deployProject(deploymentId, project) {
   let primaryFramework = null;
+  let buildLog = "";
   const deploymentDir = path.join(__dirname, "../../temp", deploymentId);
 
   try {
@@ -344,8 +345,6 @@ async function deployProject(deploymentId, project) {
     // ✅ IMPORTANT: Générer le sous-domaine et le dossier de sortie
     const subdomain = project.name.toLowerCase().replace(/[^a-z0-9]/g, "-");
     const outputDir = path.join("/var/www/deployed", subdomain);
-
-    let buildLog = "";
 
     // Mettre à jour le statut
     buildLog += `🚀 [${new Date().toISOString()}] Démarrage du déploiement...\n`;
@@ -750,7 +749,7 @@ export default defineConfig({
   } catch (error) {
     console.error(`❌ Erreur déploiement ${deploymentId}:`, error);
 
-    let finalLog = buildLog || "";
+    let finalLog = buildLog || ""; // ✅ buildLog est maintenant défini
     finalLog += `❌ [${new Date().toISOString()}] Erreur: ${error.message}\n`;
 
     if (primaryFramework) {

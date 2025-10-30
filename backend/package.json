@@ -12,6 +12,7 @@
     "@supabase/supabase-js": "^2.38.4",
     "axios": "^1.6.2",
     "bcryptjs": "^2.4.3",
+    "connect-redis": "^9.0.0",
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.5",
     "dotenv": "^16.3.1",
@@ -22,6 +23,7 @@
     "morgan": "^1.10.0",
     "passport": "^0.7.0",
     "passport-github2": "^0.1.12",
+    "redis": "^5.9.0",
     "swagger-jsdoc": "^6.2.8",
     "swagger-ui-express": "^5.0.1",
     "ws": "^8.18.3"

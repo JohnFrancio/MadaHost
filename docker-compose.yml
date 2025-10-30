@@ -1,6 +1,19 @@
 version: '3.8'
 
 services:
+    # ✅ Ajouter Redis
+  redis:
+    image: redis:7-alpine
+    restart: always
+    container_name: madahost_redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - madahost_network
+    command: redis-server --appendonly yes
+
   api:
     build:
       context: ./backend
@@ -10,14 +23,17 @@ services:
     environment:
       - NODE_ENV=production
       - PORT=3001
+      - REDIS_URL=redis://redis:6379  # ✅ Ajouter Redis URL
     env_file:
       - .env.production
     volumes:
       - ./backend/logs:/app/logs
-      - deployed_projects:/var/www/deployed  # ✅ Volume partagé avec Nginx
+      - deployed_projects:/var/www/deployed
       - build_cache:/app/build_cache
     networks:
       - madahost_network
+    depends_on:
+      - redis  # ✅ Dépendre de Redis
 
   frontend:
     build:
@@ -56,6 +72,8 @@ volumes:
   build_cache:
     driver: local
   nginx_cache:
+    driver: local
+  redis_data:  # ✅ Ajouter volume Redis
     driver: local
 
 networks:

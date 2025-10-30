@@ -1,45 +1,34 @@
-# Build stage
-FROM node:18-alpine AS builder
+# backend/Dockerfile.prod
+FROM node:18-alpine
 
-WORKDIR /backend
+WORKDIR /app
 
-# Copier package.json et package-lock.json
+# Installer git (nécessaire pour cloner les repos)
+RUN apk add --no-cache git
+
+# Copier package files
 COPY package*.json ./
 
 # Installer les dépendances
 RUN npm ci --only=production
 
-# Production stage
-FROM node:18-alpine
-
-WORKDIR /backend
-
-# Installer curl pour healthcheck
-RUN apk add --no-cache curl
-
-# Créer un utilisateur non-root
-RUN addgroup -g 1001 -S nodejs && \
-    adduser -S nodejs -u 1001
-
-# Copier les dépendances depuis builder
-COPY --from=builder /backend/node_modules ./node_modules
-
 # Copier le code source
-COPY --chown=nodejs:nodejs . .
+COPY . .
 
-# Créer les dossiers nécessaires
-RUN mkdir -p logs deployed_projects build_cache && \
-    chown -R nodejs:nodejs logs deployed_projects build_cache
-
-# Changer vers l'utilisateur non-root
-USER nodejs
+# ✅ CRITIQUE: Créer les dossiers avec les bonnes permissions
+RUN mkdir -p /var/www/deployed && \
+    mkdir -p /app/temp && \
+    mkdir -p /app/logs && \
+    chown -R node:node /var/www/deployed && \
+    chown -R node:node /app/temp && \
+    chown -R node:node /app && \
+    chmod -R 755 /var/www/deployed
 
 # Exposer le port
 EXPOSE 3001
 
-# Healthcheck
-HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
-    CMD curl -f http://localhost:3001/health || exit 1
+# ✅ Utiliser l'utilisateur node (pas root)
+USER node
 
-# Démarrer l'application
+# Démarrer le serveur
 CMD ["node", "server.js"]
