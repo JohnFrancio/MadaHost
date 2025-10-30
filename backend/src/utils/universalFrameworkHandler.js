@@ -1,4 +1,4 @@
-// backend/src/utils/universalFrameworkHandler.js - VERSION FINALE
+// backend/src/utils/universalFrameworkHandler.js - VERSION FINALE SANS CRÉATION CONFIG
 const fs = require("fs").promises;
 const path = require("path");
 
@@ -20,7 +20,7 @@ class UniversalFrameworkHandler {
       },
 
       vue: {
-        dependencies: ["vue", "@vitejs/plugin-vue", "vite", "terser"],
+        dependencies: ["vue", "@vitejs/plugin-vue", "vite"],
         configFiles: ["vite.config.js", "vite.config.ts"],
         buildCommands: ["npm run build"],
         detection: ["vue", ".vue", "createApp", "Vue.createApp", "from 'vue'"],
@@ -28,19 +28,13 @@ class UniversalFrameworkHandler {
           buildCommand: "npm run build",
           outputDir: "dist",
           installCommand: "npm install",
-          requiredDeps: ["vue", "vite", "@vitejs/plugin-vue", "terser"],
+          requiredDeps: ["vue", "vite", "@vitejs/plugin-vue"],
           env: { NODE_ENV: "production" },
         },
       },
 
       react: {
-        dependencies: [
-          "react",
-          "react-dom",
-          "@vitejs/plugin-react",
-          "vite",
-          "terser",
-        ],
+        dependencies: ["react", "react-dom", "@vitejs/plugin-react", "vite"],
         configFiles: ["vite.config.js", "vite.config.ts"],
         buildCommands: ["npm run build"],
         detection: [
@@ -55,13 +49,7 @@ class UniversalFrameworkHandler {
           buildCommand: "npm run build",
           outputDir: "dist",
           installCommand: "npm install",
-          requiredDeps: [
-            "react",
-            "react-dom",
-            "vite",
-            "@vitejs/plugin-react",
-            "terser",
-          ],
+          requiredDeps: ["react", "react-dom", "vite", "@vitejs/plugin-react"],
           env: { NODE_ENV: "production" },
         },
       },
@@ -153,17 +141,22 @@ class UniversalFrameworkHandler {
   async setupFrameworks(projectPath, frameworks, buildLog = "") {
     buildLog += `🛠️  Configuration des frameworks: ${frameworks.join(", ")}\n`;
 
-    // 1. Installer les dépendances manquantes
-    const { missingDeps, needsReinstall } =
-      await this.installMissingDependencies(projectPath, frameworks, buildLog);
+    // ✅ CHANGEMENT : On vérifie seulement les dépendances, on ne crée PAS de configs
+    const missingDeps = await this.checkMissingDependencies(
+      projectPath,
+      frameworks,
+      buildLog
+    );
 
-    // 2. Créer les fichiers de configuration
-    buildLog = await this.createConfigFiles(projectPath, frameworks, buildLog);
+    // On crée seulement les configs Tailwind si nécessaire (pas de conflit)
+    if (frameworks.includes("tailwind")) {
+      buildLog = await this.createTailwindConfigIfNeeded(projectPath, buildLog);
+    }
 
-    return { buildLog, missingDeps, needsReinstall };
+    return { buildLog, missingDeps };
   }
 
-  async installMissingDependencies(projectPath, frameworks, buildLog) {
+  async checkMissingDependencies(projectPath, frameworks, buildLog) {
     const packageJsonPath = path.join(projectPath, "package.json");
     let packageJson = {};
 
@@ -176,7 +169,6 @@ class UniversalFrameworkHandler {
       ...packageJson.devDependencies,
     };
     const missingDeps = [];
-    let needsReinstall = false;
 
     // Vérifier les dépendances selon le framework
     for (const framework of frameworks) {
@@ -191,69 +183,21 @@ class UniversalFrameworkHandler {
     }
 
     if (missingDeps.length > 0) {
-      if (!packageJson.devDependencies) packageJson.devDependencies = {};
-
-      const latestVersions = {
-        tailwindcss: "^3.3.0",
-        autoprefixer: "^10.4.0",
-        postcss: "^8.4.0",
-        terser: "^5.19.0",
-        vue: "^3.3.4",
-        "@vitejs/plugin-vue": "^4.4.0",
-        react: "^18.2.0",
-        "react-dom": "^18.2.0",
-        "@vitejs/plugin-react": "^4.1.0",
-        vite: "^4.4.9",
-        next: "^14.0.0",
-      };
-
-      for (const dep of missingDeps) {
-        packageJson.devDependencies[dep] = latestVersions[dep] || "latest";
-      }
-
-      // Modifier le script build pour utiliser npx (sécurité)
-      if (!packageJson.scripts) packageJson.scripts = {};
-
-      if (frameworks.includes("react") || frameworks.includes("vue")) {
-        if (
-          !packageJson.scripts.build ||
-          packageJson.scripts.build === "vite build"
-        ) {
-          packageJson.scripts.build = "npx vite build";
-          buildLog += `🔧 Script build modifié pour utiliser npx\n`;
-        }
-      }
-
-      await fs.writeFile(packageJsonPath, JSON.stringify(packageJson, null, 2));
-      needsReinstall = true;
-      buildLog += `📝 package.json mis à jour avec ${missingDeps.length} dépendances\n`;
+      buildLog += `⚠️ Dépendances manquantes détectées: ${missingDeps.join(
+        ", "
+      )}\n`;
+      buildLog += `ℹ️  Ces dépendances seront installées lors du npm install\n`;
+    } else {
+      buildLog += `✅ Toutes les dépendances nécessaires sont présentes\n`;
     }
 
-    return { missingDeps, needsReinstall };
+    return missingDeps;
   }
 
-  async createConfigFiles(projectPath, frameworks, buildLog) {
-    // Tailwind Config
-    if (frameworks.includes("tailwind")) {
-      buildLog = await this.createTailwindConfig(projectPath, buildLog);
-      buildLog = await this.createPostCSSConfig(projectPath, buildLog);
-    }
-
-    // Vite Config pour React/Vue
-    if (frameworks.includes("react") || frameworks.includes("vue")) {
-      buildLog = await this.createSmartViteConfig(
-        projectPath,
-        frameworks,
-        buildLog
-      );
-    }
-
-    return buildLog;
-  }
-
-  async createTailwindConfig(projectPath, buildLog) {
-    const configPath = path.join(projectPath, "tailwind.config.js");
-    if (!(await this.fileExists(configPath))) {
+  async createTailwindConfigIfNeeded(projectPath, buildLog) {
+    // Tailwind Config - Seulement si absent
+    const tailwindConfigPath = path.join(projectPath, "tailwind.config.js");
+    if (!(await this.fileExists(tailwindConfigPath))) {
       const config = `/** @type {import('tailwindcss').Config} */
 export default {
   content: [
@@ -265,65 +209,26 @@ export default {
   },
   plugins: [],
 }`;
-      await fs.writeFile(configPath, config);
+      await fs.writeFile(tailwindConfigPath, config);
       buildLog += `⚙️ tailwind.config.js créé\n`;
+    } else {
+      buildLog += `✅ tailwind.config.js existe déjà\n`;
     }
-    return buildLog;
-  }
 
-  async createPostCSSConfig(projectPath, buildLog) {
-    const configPath = path.join(projectPath, "postcss.config.js");
-    if (!(await this.fileExists(configPath))) {
+    // PostCSS Config - Seulement si absent
+    const postcssConfigPath = path.join(projectPath, "postcss.config.js");
+    if (!(await this.fileExists(postcssConfigPath))) {
       const config = `export default {
   plugins: {
     tailwindcss: {},
     autoprefixer: {},
   },
 }`;
-      await fs.writeFile(configPath, config);
+      await fs.writeFile(postcssConfigPath, config);
       buildLog += `⚙️ postcss.config.js créé\n`;
+    } else {
+      buildLog += `✅ postcss.config.js existe déjà\n`;
     }
-    return buildLog;
-  }
-
-  async createSmartViteConfig(projectPath, frameworks, buildLog) {
-    const configPath = path.join(projectPath, "vite.config.js");
-
-    let pluginImports = [];
-    let plugins = [];
-    let outputDir = "dist";
-
-    if (frameworks.includes("vue")) {
-      pluginImports.push("import vue from '@vitejs/plugin-vue'");
-      plugins.push("vue()");
-    } else if (frameworks.includes("react")) {
-      pluginImports.push("import react from '@vitejs/plugin-react'");
-      plugins.push("react()");
-    }
-
-    const config = `import { defineConfig } from 'vite'
-${pluginImports.join("\n")}
-
-export default defineConfig({
-  plugins: [${plugins.join(", ")}],
-  base: './',
-  build: {
-    outDir: '${outputDir}',
-    assetsDir: 'assets',
-    sourcemap: false,
-    minify: 'terser',
-    rollupOptions: {
-      output: {
-        manualChunks: undefined,
-      }
-    }
-  }
-})`;
-
-    await fs.writeFile(configPath, config);
-    buildLog += `⚙️ Configuration Vite optimisée créée pour ${frameworks.join(
-      ", "
-    )}\n`;
 
     return buildLog;
   }

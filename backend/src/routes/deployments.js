@@ -400,7 +400,7 @@ async function deployProject(deploymentId, project) {
       buildLog += `⚠️ Impossible de récupérer le commit hash\n`;
     }
 
-    // ==================== DÉTECTION ET CONFIGURATION ====================
+    // ==================== DÉTECTION DES FRAMEWORKS ====================
     buildLog += `🔍 [${new Date().toISOString()}] Détection des frameworks...\n`;
     await updateDeploymentLog(deploymentId, buildLog);
 
@@ -432,16 +432,10 @@ async function deployProject(deploymentId, project) {
         finalOutputDir = primaryFramework.config.outputDir;
         buildLog += `📁 Dossier de sortie automatique: ${finalOutputDir}\n`;
       }
-
-      if (
-        !project.install_command ||
-        project.install_command === "npm install"
-      ) {
-        finalInstallCommand = primaryFramework.config.installCommand;
-      }
     }
 
-    // Setup des frameworks (crée configs, modifie package.json)
+    // ✅ IMPORTANT : Ne PAS modifier le package.json ni créer de vite.config
+    // On laisse le projet utiliser sa propre configuration
     const { buildLog: setupLog } = await frameworkHandler.setupFrameworks(
       deploymentDir,
       detectedFrameworks,
@@ -450,7 +444,6 @@ async function deployProject(deploymentId, project) {
     buildLog = setupLog;
 
     // ==================== INSTALLATION DES DÉPENDANCES ====================
-    // ✅ TOUJOURS RÉINSTALLER après la configuration pour garantir que tout est installé
     await supabase
       .from("deployments")
       .update({ status: "building", build_log: buildLog })
@@ -463,37 +456,38 @@ async function deployProject(deploymentId, project) {
       buildLog += `📦 [${new Date().toISOString()}] Installation des dépendances...\n`;
       await updateDeploymentLog(deploymentId, buildLog);
 
-      buildLog += `🔧 Commande d'installation: ${finalInstallCommand}\n`;
+      buildLog += `🔧 Commande d'installation: npm install\n`;
 
-      // ✅ Installation avec timeout généreux
+      // ✅ Installation simple avec le package.json original
       const installOutput = await execCommand(
-        `cd ${deploymentDir} && ${finalInstallCommand}`,
-        {},
-        180000 // 3 minutes timeout
+        `cd ${deploymentDir} && npm install`,
+        { NODE_ENV: "production" },
+        300000 // 5 minutes timeout
       );
 
       buildLog += `✅ Dépendances installées avec succès\n`;
 
-      // Vérifier que Vite est bien installé pour les projets React/Vue
-      if (
-        detectedFrameworks.includes("react") ||
-        detectedFrameworks.includes("vue")
-      ) {
-        try {
-          await fs.access(path.join(deploymentDir, "node_modules", "vite"));
-          buildLog += `✅ Vite détecté dans node_modules\n`;
-        } catch {
-          buildLog += `⚠️ Vite non trouvé, installation forcée...\n`;
-          await execCommand(
-            `cd ${deploymentDir} && npm install vite @vitejs/plugin-react terser --save-dev`,
-            {},
-            60000
-          );
-          buildLog += `✅ Vite installé en force\n`;
+      // Vérifier que le dossier node_modules existe
+      try {
+        await fs.access(path.join(deploymentDir, "node_modules"));
+        buildLog += `✅ node_modules créé avec succès\n`;
+
+        // Lister quelques packages clés pour debug
+        const nodeModulesContent = await execCommand(
+          `cd ${deploymentDir} && ls node_modules | grep -E "^(vite|react|vue)$" | head -5`,
+          {},
+          5000
+        );
+        if (nodeModulesContent.trim()) {
+          buildLog += `📦 Packages détectés: ${nodeModulesContent
+            .trim()
+            .replace(/\n/g, ", ")}\n`;
         }
+      } catch (e) {
+        buildLog += `⚠️ Impossible de vérifier node_modules\n`;
       }
     } catch (error) {
-      buildLog += `⚠️ Erreur installation: ${error.message}\n`;
+      buildLog += `❌ Erreur installation: ${error.message}\n`;
       throw error;
     }
 
@@ -504,14 +498,14 @@ async function deployProject(deploymentId, project) {
       await updateDeploymentLog(deploymentId, buildLog);
 
       try {
-        // ✅ CORRECTION : Ajouter node_modules/.bin au PATH
+        // ✅ CRUCIAL : Ajouter node_modules/.bin au PATH
         const nodeBinPath = path.join(deploymentDir, "node_modules", ".bin");
 
         let buildEnv = {
           NODE_ENV: "production",
           CI: "true",
           GENERATE_SOURCEMAP: "false",
-          PATH: `${nodeBinPath}:${process.env.PATH}`, // ✅ CRUCIAL
+          PATH: `${nodeBinPath}:${process.env.PATH}`,
         };
 
         if (primaryFramework) {
@@ -526,56 +520,68 @@ async function deployProject(deploymentId, project) {
           }
         }
 
+        // ✅ Utiliser directement le script npm (pas npx)
         const buildOutput = await execCommand(
-          `cd ${deploymentDir} && ${finalBuildCommand}`,
-          buildEnv
+          `cd ${deploymentDir} && npm run build`,
+          buildEnv,
+          600000 // 10 minutes timeout
         );
+
         buildLog += `✅ Build réussi avec ${
           primaryFramework?.name || "configuration par défaut"
         }\n`;
       } catch (buildError) {
         buildLog += `⚠️ Build échoué: ${buildError.message}\n`;
 
-        // Stratégies de fallback avec npx
-        if (
-          primaryFramework?.name === "vue" ||
-          primaryFramework?.name === "react"
-        ) {
-          buildLog += `🔄 Tentative build avec npx...\n`;
+        // Fallback 1 : Essayer avec le binaire direct
+        buildLog += `🔄 Tentative avec le binaire direct...\n`;
+        try {
+          const nodeBinPath = path.join(deploymentDir, "node_modules", ".bin");
+          const fallbackEnv = {
+            NODE_ENV: "production",
+            PATH: `${nodeBinPath}:${process.env.PATH}`,
+          };
+
+          // Essayer de trouver le bon binaire
+          let buildBinary = "vite";
+          if (primaryFramework?.name === "nextjs") {
+            buildBinary = "next";
+          }
+
+          await execCommand(
+            `cd ${deploymentDir} && ${nodeBinPath}/${buildBinary} build`,
+            fallbackEnv,
+            600000
+          );
+
+          buildLog += `✅ Build réussi avec binaire direct\n`;
+        } catch (fallbackError) {
+          buildLog += `❌ Fallback échoué: ${fallbackError.message}\n`;
+
+          // Fallback 2 : Essayer sans minification
+          buildLog += `🔄 Tentative sans minification...\n`;
           try {
-            const fallbackEnv = {
+            const nodeBinPath = path.join(
+              deploymentDir,
+              "node_modules",
+              ".bin"
+            );
+            const noMinifyEnv = {
               NODE_ENV: "production",
-              PATH: `${path.join(deploymentDir, "node_modules", ".bin")}:${
-                process.env.PATH
-              }`,
+              PATH: `${nodeBinPath}:${process.env.PATH}`,
             };
 
             await execCommand(
-              `cd ${deploymentDir} && npx vite build`,
-              fallbackEnv
+              `cd ${deploymentDir} && ${nodeBinPath}/vite build --minify false`,
+              noMinifyEnv,
+              600000
             );
-            buildLog += `✅ Build réussi avec npx\n`;
-          } catch (fallbackError) {
-            buildLog += `❌ Fallback npx échoué: ${fallbackError.message}\n`;
-            throw buildError;
-          }
-        } else {
-          buildLog += `🔄 Tentative build générique sans optimisations...\n`;
-          try {
-            const simpleBuildEnv = {
-              NODE_ENV: "production",
-              PATH: `${path.join(deploymentDir, "node_modules", ".bin")}:${
-                process.env.PATH
-              }`,
-            };
-            await execCommand(
-              `cd ${deploymentDir} && npm run build`,
-              simpleBuildEnv
-            );
-            buildLog += `✅ Build générique réussi\n`;
-          } catch (genericError) {
-            buildLog += `❌ Tous les builds ont échoué: ${genericError.message}\n`;
-            throw buildError;
+
+            buildLog += `✅ Build réussi sans minification\n`;
+          } catch (noMinifyError) {
+            buildLog += `❌ Tous les builds ont échoué\n`;
+            buildLog += `📋 Dernière erreur: ${noMinifyError.message}\n`;
+            throw buildError; // Relancer l'erreur originale
           }
         }
       }
