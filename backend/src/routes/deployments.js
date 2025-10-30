@@ -593,73 +593,73 @@ export default defineConfig({
       await fs.access(packageJsonPath);
 
       buildLog += `📦 [${new Date().toISOString()}] Installation des dépendances...\n`;
-      buildLog += `🔧 Commande d'installation: ${finalInstallCommand}\n`;
-      await updateDeploymentLog(deploymentId, buildLog);
 
-      // ✅ INSTALLATION COMPLÈTE avec --force et nettoyage du cache
-      await execCommand(
-        "rm -rf node_modules package-lock.json && npm install --force --no-audit --no-fund",
-        {
-          npm_config_platform: "linux",
-          npm_config_arch: "x64",
-        },
-        300000,
-        deploymentDir,
-        deploymentDir
-      );
-
-      buildLog += `✅ Dépendances installées avec succès\n`;
-
-      // ✅ VÉRIFICATION CRITIQUE: Vérifier que Vite est bien installé
+      // ✅ UTILISER NODE DIRECTEMENT POUR ÉVITER NPM
       try {
-        // Vérifier le package Vite dans node_modules
-        const vitePackagePath = path.join(
-          deploymentDir,
-          "node_modules",
-          "vite",
-          "package.json"
-        );
-        await fs.access(vitePackagePath);
-        const vitePackage = JSON.parse(
-          await fs.readFile(vitePackagePath, "utf8")
-        );
-        buildLog += `✅ Vite installé: v${vitePackage.version}\n`;
+        // Lire package.json
+        const packageJson = JSON.parse(await fs.readFile(packageJsonPath, "utf8"));
+        const allDeps = {
+          ...packageJson.dependencies,
+          ...packageJson.devDependencies
+        };
 
-        // Vérifier le binaire
-        const viteBinaryPath = path.join(
-          deploymentDir,
-          "node_modules",
-          ".bin",
-          "vite"
-        );
-        await fs.access(viteBinaryPath);
-        buildLog += `✅ Vite binary présent\n`;
+        buildLog += `🔧 Installation avec Node.js direct...\n`;
 
-        // Test d'exécution
-        const viteVersion = await execCommand(
-          "./node_modules/.bin/vite --version",
-          {},
-          30000,
-          deploymentDir,
-          deploymentDir
-        );
-        buildLog += `✅ Vite exécutable: ${viteVersion.trim()}\n`;
-      } catch (viteError) {
-        buildLog += `❌ Vite mal installé: ${viteError.message}\n`;
+        // Créer un script d'installation minimal
+        const installScript = `
+          const { execSync } = require('child_process');
+          const fs = require('fs');
+          
+          console.log('📦 Installation des dépendances...');
+          
+          // Créer node_modules si nécessaire
+          if (!fs.existsSync('node_modules')) {
+            fs.mkdirSync('node_modules', { recursive: true });
+          }
+          
+          // Installer les dépendances critiques une par une
+          const deps = ${JSON.stringify(allDeps)};
+          const criticalDeps = ['vite', 'react', 'react-dom', '@vitejs/plugin-react'];
+          
+          for (const dep of criticalDeps) {
+            if (deps[dep]) {
+              console.log('📦 Installing ' + dep);
+              try {
+                execSync('node -e "\\\\\\"require(\\\\\\\\\\\\\"child_process\\\\\\\\\\\\\").execSync(\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\`npm install ${dep}@${deps[dep]} --no-save\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\`, {stdio: \\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\'inherit\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\'})\\\\\\\""', { 
+                  stdio: 'inherit',
+                  shell: true 
+                });
+              } catch (e) {
+                console.log('⚠️ Failed to install ' + dep + ', trying alternative method');
+                // Méthode alternative
+                execSync('curl -s https://registry.npmjs.org/${dep} | node -e "\\\\\\"const data = JSON.parse(require(\\\\\\\\\\\\\"fs\\\\\\\\\\\\\").readFileSync(0, \\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\'utf8\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\')); console.log(data.versions[\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\'${deps[dep].replace(/^\\^/, \\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\'\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\')}\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\'].dist.tarball)\\\\\\\"" | xargs curl -s | tar -xz', {
+                  stdio: 'inherit',
+                  shell: true
+                });
+              }
+            }
+          }
+          
+          console.log('✅ Installation terminée');
+        `;
 
-        // ✅ RÉINSTALLATION COMPLÈTE
-        buildLog += `🔄 Réinstallation complète...\n`;
-        await updateDeploymentLog(deploymentId, buildLog);
-
+        // Écrire et exécuter le script
+        const scriptPath = path.join(deploymentDir, 'install.js');
+        await fs.writeFile(scriptPath, installScript);
+        
         await execCommand(
-          "rm -rf node_modules package-lock.json && npm install vite@latest @vitejs/plugin-react@latest --save-dev --force --no-audit --no-fund",
+          `node install.js`,
           {},
-          180000,
+          300000,
           deploymentDir,
           deploymentDir
         );
+        
+        buildLog += `✅ Dépendances installées avec Node.js\n`;
 
-        buildLog += `✅ Réinstallation terminée\n`;
+      } catch (installError) {
+        buildLog += `❌ Installation échouée: ${installError.message}\n`;
+        throw installError;
       }
 
       await updateDeploymentLog(deploymentId, buildLog);

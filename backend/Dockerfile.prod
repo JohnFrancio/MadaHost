@@ -1,9 +1,15 @@
-# backend/Dockerfile.prod - VERSION OPTIMISÉE
+# backend/Dockerfile.prod - VERSION CORRIGÉE AVEC NPM STABLE
 FROM node:18-alpine
 
-# ✅ Installer Git et VITE GLOBALEMENT
-RUN apk add --no-cache git bash && \
-    npm install -g vite@^6.0.0
+# ✅ TOUT FAIRE EN TANT QUE ROOT PENDANT LE BUILD
+RUN apk add --no-cache \
+    git \
+    bash \
+    python3 \
+    make \
+    g++ \
+    && npm install -g npm@latest \
+    && npm cache clean --force
 
 WORKDIR /backend
 
@@ -11,30 +17,20 @@ WORKDIR /backend
 COPY package*.json ./
 
 # Installer les dépendances
-RUN npm ci --only=production
+RUN npm ci --only=production --no-audit --no-fund
 
 # Copier le code source
 COPY . .
 
-# ✅ Créer TOUS les dossiers nécessaires avec les bonnes permissions
-RUN mkdir -p /var/www/deployed && \
-    mkdir -p /backend/temp && \
-    mkdir -p /backend/builds && \
-    mkdir -p /backend/public && \
-    mkdir -p /backend/logs && \
-    chown -R node:node /var/www/deployed && \
-    chown -R node:node /backend/temp && \
-    chown -R node:node /backend/builds && \
-    chown -R node:node /backend/public && \
-    chmod -R 755 /var/www/deployed && \
-    chmod -R 755 /backend/temp && \
-    chmod -R 755 /backend/builds && \
-    chmod -R 755 /backend/public
+# ✅ CRÉER LES DOSSIERS AVEC PERMISSIONS
+RUN mkdir -p /var/www/deployed /backend/temp /backend/builds /backend/public /backend/logs \
+    && chown -R node:node /var/www/deployed /backend/temp /backend/builds /backend/public /backend/logs \
+    && chmod -R 755 /var/www/deployed /backend/temp /backend/builds /backend/public
 
 # Exposer le port
 EXPOSE 3001
 
-# ✅ Utiliser l'utilisateur node (pas root)
+# ✅ CHANGER VERS L'UTILISATEUR NON-ROOT
 USER node
 
 # Démarrer le serveur
