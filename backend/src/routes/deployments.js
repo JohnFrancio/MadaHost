@@ -587,7 +587,7 @@ export default defineConfig({
       }
     }
 
-    // ==================== INSTALLATION DES DÉPENDANCES - VERSION ULTIME ====================
+    // ==================== INSTALLATION DES DÉPENDANCES - VERSION GARANTIE ====================
     const packageJsonPath = path.join(deploymentDir, "package.json");
     try {
       await fs.access(packageJsonPath);
@@ -595,151 +595,114 @@ export default defineConfig({
       buildLog += `📦 [${new Date().toISOString()}] Installation des dépendances...\n`;
       await updateDeploymentLog(deploymentId, buildLog);
 
-      // ✅ APPROCHE DIRECTE SANS NPM SI CASSÉ
+      // ✅ LIRE LE PACKAGE.JSON POUR COMPRENDRE LE PROBLÈME
+      const packageJson = JSON.parse(
+        await fs.readFile(packageJsonPath, "utf8")
+      );
+      const allDeps = {
+        ...packageJson.dependencies,
+        ...packageJson.devDependencies,
+      };
+
+      buildLog += `📋 Dépendances détectées: ${Object.keys(allDeps).join(
+        ", "
+      )}\n`;
+
       let installSuccessful = false;
 
-      // Vérifier si npm fonctionne
+      // ✅ ÉTAPE 1: INSTALLATION NORMALE
       try {
-        buildLog += `🔍 Vérification de npm...\n`;
+        buildLog += `🔧 Installation normale...\n`;
         await execCommand(
-          "npm --version",
+          "npm install --no-audit --no-fund --prefer-offline --verbose",
           {},
-          30000,
-          deploymentDir,
-          deploymentDir
-        );
-        buildLog += `✅ npm fonctionne\n`;
-
-        // Essai 1: Installation normale avec npm
-        buildLog += `🔧 Installation avec npm...\n`;
-        await execCommand(
-          "npm install --no-audit --no-fund --prefer-offline",
-          {
-            npm_config_platform: "linux",
-            npm_config_arch: "x64",
-          },
           300000,
           deploymentDir,
           deploymentDir
         );
-        buildLog += `✅ Dépendances installées avec npm\n`;
-        installSuccessful = true;
-      } catch (npmCheckError) {
-        buildLog += `❌ npm cassé: ${npmCheckError.message}\n`;
 
-        // ✅ INSTALLATION MANUELLE D'URGENCE
-        buildLog += `🔄 Installation manuelle d'urgence...\n`;
-        await updateDeploymentLog(deploymentId, buildLog);
+        // Vérifier si Vite est installé
+        try {
+          await fs.access(path.join(deploymentDir, "node_modules", "vite"));
+          buildLog += `✅ Vite installé normalement\n`;
+          installSuccessful = true;
+        } catch {
+          buildLog += `❌ Vite NON installé après npm install\n`;
+        }
+      } catch (npmError) {
+        buildLog += `❌ Installation normale échouée: ${npmError.message}\n`;
+      }
+
+      // ✅ ÉTAPE 2: SI VITE MANQUANT, L'INSTALLER MANUELLEMENT
+      if (!installSuccessful) {
+        buildLog += `🔄 Installation manuelle de Vite...\n`;
+
+        // Vérifier la version requise de Vite
+        const viteVersion = allDeps.vite || "latest";
+        buildLog += `📦 Installation de vite@${viteVersion}...\n`;
 
         try {
-          const packageJson = JSON.parse(
-            await fs.readFile(packageJsonPath, "utf8")
+          await execCommand(
+            `npm install vite@${viteVersion} --save-dev --no-audit --no-fund`,
+            {},
+            180000,
+            deploymentDir,
+            deploymentDir
           );
-          const allDeps = {
-            ...packageJson.dependencies,
-            ...packageJson.devDependencies,
-          };
-
-          // Vite est CRITIQUE - l'installer d'abord
-          if (allDeps.vite) {
-            buildLog += `📦 Installation manuelle de Vite...\n`;
-
-            // Télécharger et extraire Vite manuellement
-            await execCommand(
-              `curl -L https://registry.npmjs.org/vite/-/vite-${allDeps.vite.replace(
-                "^",
-                ""
-              )}.tgz | tar -xz`,
-              {},
-              120000,
-              deploymentDir,
-              deploymentDir
-            );
-
-            // Déplacer les fichiers
-            await execCommand(
-              `mv package/* node_modules/vite/ 2>/dev/null || true`,
-              {},
-              30000,
-              deploymentDir,
-              deploymentDir
-            );
-
-            buildLog += `✅ Vite installé manuellement\n`;
-          }
-
-          // Installer React si nécessaire
-          if (allDeps.react) {
-            buildLog += `📦 Installation manuelle de React...\n`;
-            await execCommand(
-              `curl -L https://registry.npmjs.org/react/-/react-${allDeps.react.replace(
-                "^",
-                ""
-              )}.tgz | tar -xz && mv package/* node_modules/react/ 2>/dev/null || true`,
-              {},
-              120000,
-              deploymentDir,
-              deploymentDir
-            );
-          }
-
-          buildLog += `✅ Installation manuelle terminée\n`;
+          buildLog += `✅ Vite installé manuellement\n`;
           installSuccessful = true;
-        } catch (manualError) {
-          buildLog += `❌ Installation manuelle échouée: ${manualError.message}\n`;
+        } catch (viteError) {
+          buildLog += `❌ Installation Vite échouée: ${viteError.message}\n`;
+
+          // Essayer avec une version spécifique
+          try {
+            buildLog += `🔄 Essai avec vite@5.2.0...\n`;
+            await execCommand(
+              "npm install vite@5.2.0 --save-dev --no-audit --no-fund",
+              {},
+              180000,
+              deploymentDir,
+              deploymentDir
+            );
+            buildLog += `✅ Vite 5.2.0 installé\n`;
+            installSuccessful = true;
+          } catch (vite5Error) {
+            buildLog += `❌ Vite 5.2.0 échoué: ${vite5Error.message}\n`;
+          }
         }
       }
 
-      if (!installSuccessful) {
-        throw new Error("Impossible d'installer les dépendances");
-      }
-
-      // ✅ VÉRIFICATION FINALE
-      try {
-        // Vérifier que Vite est présent
-        const vitePath = path.join(deploymentDir, "node_modules", "vite");
-        await fs.access(vitePath);
-        buildLog += `✅ Vite présent dans node_modules\n`;
-
-        // Vérifier le binaire
-        const viteBinPath = path.join(
-          deploymentDir,
-          "node_modules",
-          ".bin",
-          "vite"
-        );
+      // ✅ ÉTAPE 3: VÉRIFICATION FINALE
+      if (installSuccessful) {
         try {
-          await fs.access(viteBinPath);
-          buildLog += `✅ Vite binary présent\n`;
-        } catch {
-          buildLog += `📝 Création du binaire Vite...\n`;
-          // Créer le binaire manuellement si absent
-          const viteBinContent = `#!/bin/sh
-basedir=$(dirname "$(echo "$0" | sed -e 's,\\\\,/,g')")
-case \$(uname) in
-    *CYGWIN*|*MINGW*|*MSYS*) basedir=\$(cygpath -w "\$basedir");;
-esac
-if [ -x "\$basedir/node" ]; then
-  "\$basedir/node" "\$basedir/../vite/bin/vite.js" "\$@"
-  ret=$?
-else
-  node "\$basedir/../vite/bin/vite.js" "\$@"
-  ret=$?
-fi
-exit \$ret
-`;
-          await fs.writeFile(viteBinPath, viteBinContent);
-          await execCommand(
-            `chmod +x ${viteBinPath}`,
+          // Vérifier que Vite est vraiment là
+          const viteCheck = await execCommand(
+            'npm list vite && ls -la node_modules/.bin/vite && node -e "console.log(require.resolve("vite"))"',
             {},
             30000,
             deploymentDir,
             deploymentDir
           );
-          buildLog += `✅ Binaire Vite créé\n`;
+          buildLog += `✅ Vérification Vite:\n${viteCheck}\n`;
+        } catch (checkError) {
+          buildLog += `⚠️ Vérification échouée: ${checkError.message}\n`;
         }
-      } catch (checkError) {
-        buildLog += `⚠️ Vérification finale échouée: ${checkError.message}\n`;
+      } else {
+        throw new Error("Impossible d'installer Vite");
+      }
+      // Après npm install, ajoutez ce debug
+      buildLog += `🔍 Vérification de ce qui est installé...\n`;
+      try {
+        const installedCheck = await execCommand(
+          'npm list --depth=0 && ls -la node_modules/ && find node_modules/ -name "vite*" -type f | head -10',
+          {},
+          30000,
+          deploymentDir,
+          deploymentDir
+        );
+        buildLog += `📋 Contenu node_modules:\n${installedCheck}\n`;
+      } catch (debugError) {
+        buildLog += `❌ Debug échoué: ${debugError.message}\n`;
       }
 
       await updateDeploymentLog(deploymentId, buildLog);
@@ -749,54 +712,102 @@ exit \$ret
       throw error;
     }
 
-    // ==================== BUILD DU PROJET - VERSION CORRIGÉE ====================
+    // ==================== BUILD DU PROJET - VERSION ROBUSTE ====================
     if (finalBuildCommand && finalBuildCommand !== "") {
       buildLog += `🏗️ [${new Date().toISOString()}] Build du projet...\n`;
       buildLog += `🔧 Commande de build: ${finalBuildCommand}\n`;
       await updateDeploymentLog(deploymentId, buildLog);
 
       try {
-        // ✅ UTILISER LE BINAIRE VITE DIRECTEMENT
-        const viteBinPath = path.join(
-          deploymentDir,
-          "node_modules",
-          ".bin",
-          "vite"
-        );
+        let buildSuccessful = false;
+        let buildMethod = "";
 
+        // ✅ ESSAI 1: Commande originale
         try {
-          await fs.access(viteBinPath);
-          buildLog += `🔧 Build avec binaire Vite direct...\n`;
-
           const buildOutput = await execCommand(
-            `"${viteBinPath}" build`,
+            finalBuildCommand,
             {
               NODE_ENV: "production",
               CI: "true",
+              GENERATE_SOURCEMAP: "false",
             },
             600000,
             deploymentDir,
             deploymentDir
           );
+          buildLog += `✅ Build réussi (méthode standard)\n`;
+          buildSuccessful = true;
+          buildMethod = "standard";
+        } catch (error1) {
+          buildLog += `❌ Build standard échoué: ${error1.message}\n`;
+        }
 
-          buildLog += `✅ Build réussi avec Vite!\n`;
-        } catch (viteError) {
-          buildLog += `❌ Build Vite échoué: ${viteError.message}\n`;
-
-          // ✅ FALLBACK: Utiliser le script Vite via Node
-          buildLog += `🔄 Tentative avec Node direct...\n`;
-          const viteScriptPath = path.join(
-            deploymentDir,
-            "node_modules",
-            "vite",
-            "bin",
-            "vite.js"
-          );
-
+        // ✅ ESSAI 2: Vite binaire direct
+        if (!buildSuccessful) {
           try {
-            await fs.access(viteScriptPath);
-            const nodeBuild = await execCommand(
-              `node "${viteScriptPath}" build`,
+            buildLog += `🔄 Tentative avec binaire Vite...\n`;
+
+            // Essayer différents chemins possibles pour Vite
+            const vitePaths = [
+              path.join(deploymentDir, "node_modules", ".bin", "vite"),
+              path.join(
+                deploymentDir,
+                "node_modules",
+                "vite",
+                "bin",
+                "vite.js"
+              ),
+              path.join(
+                deploymentDir,
+                "node_modules",
+                "vite",
+                "bin",
+                "vite.mjs"
+              ),
+            ];
+
+            let viteFound = false;
+            for (const vitePath of vitePaths) {
+              try {
+                await fs.access(vitePath);
+                buildLog += `✅ Vite trouvé: ${vitePath}\n`;
+
+                const buildOutput = await execCommand(
+                  `node "${vitePath}" build`,
+                  {
+                    NODE_ENV: "production",
+                    CI: "true",
+                  },
+                  600000,
+                  deploymentDir,
+                  deploymentDir
+                );
+
+                buildLog += `✅ Build réussi avec Vite direct\n`;
+                buildSuccessful = true;
+                buildMethod = "vite-direct";
+                viteFound = true;
+                break;
+              } catch (pathError) {
+                continue;
+              }
+            }
+
+            if (!viteFound) {
+              buildLog += `❌ Aucun binaire Vite trouvé\n`;
+            }
+          } catch (error2) {
+            buildLog += `❌ Build Vite direct échoué: ${error2.message}\n`;
+          }
+        }
+
+        // ✅ ESSAI 3: npx comme fallback ultime
+        if (!buildSuccessful) {
+          try {
+            buildLog += `🔄 Tentative avec npx...\n`;
+
+            const npxOutput = await execCommand(
+              "npx vite build",
               {
                 NODE_ENV: "production",
                 CI: "true",
@@ -806,12 +817,19 @@ exit \$ret
               deploymentDir
             );
 
-            buildLog += `✅ Build réussi avec Node!\n`;
-          } catch (nodeError) {
-            buildLog += `❌ Toutes les méthodes de build ont échoué\n`;
-            throw nodeError;
+            buildLog += `✅ Build réussi avec npx\n`;
+            buildSuccessful = true;
+            buildMethod = "npx";
+          } catch (error3) {
+            buildLog += `❌ Build npx échoué: ${error3.message}\n`;
           }
         }
+
+        if (!buildSuccessful) {
+          throw new Error("Toutes les méthodes de build ont échoué");
+        }
+
+        buildLog += `🎉 Build réussi avec méthode: ${buildMethod}\n`;
       } catch (buildError) {
         buildLog += `❌ Erreur build finale: ${buildError.message}\n`;
         throw buildError;
