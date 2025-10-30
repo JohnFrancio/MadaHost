@@ -376,13 +376,18 @@ async function deployProject(deploymentId, project) {
       .update({ status: "cloning", build_log: buildLog })
       .eq("id", deploymentId);
 
-    await execCommand(cloneCommand);
+    await execCommand(cloneCommand, {}, 300000, null, deploymentDir);
     buildLog += `✅ Repository cloné avec succès\n`;
 
     try {
       const commitHash = await execCommand(
-        `cd ${deploymentDir} && git rev-parse HEAD`
+        "git rev-parse HEAD",
+        {},
+        30000,
+        deploymentDir,
+        deploymentDir
       );
+
       await supabase
         .from("deployments")
         .update({ commit_hash: commitHash.trim() })
@@ -446,6 +451,7 @@ async function deployProject(deploymentId, project) {
                 "npm install @vitejs/plugin-react@^4.0.0 --save-dev --no-audit --no-fund",
                 {},
                 120000,
+                deploymentDir,
                 deploymentDir
               );
             }
@@ -456,9 +462,10 @@ async function deployProject(deploymentId, project) {
             ) {
               buildLog += `➕ Ajout de @vitejs/plugin-vue...\n`;
               await execCommand(
-                "npm install @vitejs/plugin-vue@^5.0.0 --save-dev --no-audit --no-fund",
+                "npm install @vitejs/plugin-react@^4.0.0 --save-dev --no-audit --no-fund",
                 {},
                 120000,
+                deploymentDir,
                 deploymentDir
               );
             }
@@ -589,14 +596,10 @@ async function deployProject(deploymentId, project) {
       // ✅ Installation AVEC node_modules/.bin dans le PATH
       const installOutput = await execCommand(
         finalInstallCommand,
-        {
-          // ✅ Variables pour optimisation npm
-          npm_config_platform: "linux",
-          npm_config_arch: "x64",
-          npm_config_target_platform: "linux",
-        },
+        { npm_config_platform: "linux" },
         300000,
-        deploymentDir // ✅ CWD explicite
+        deploymentDir,
+        deploymentDir
       );
 
       buildLog += `✅ Dépendances installées avec succès\n`;
@@ -668,12 +671,9 @@ async function deployProject(deploymentId, project) {
         try {
           const buildOutput = await execCommand(
             finalBuildCommand,
-            {
-              NODE_ENV: "production",
-              CI: "true",
-              GENERATE_SOURCEMAP: "false",
-            },
+            { NODE_ENV: "production" },
             600000,
+            deploymentDir,
             deploymentDir
           );
           buildLog += `✅ Build réussi (méthode standard)\n`;
@@ -801,9 +801,19 @@ async function deployProject(deploymentId, project) {
         "."
       )}\n`;
 
-      await execCommand(`rm -rf "${outputDir}"/*`);
       await execCommand(
-        `cp -r "${foundSourceDir}/"* "${outputDir}/" 2>/dev/null || true`
+        `rm -rf "${outputDir}"/*`,
+        {},
+        30000,
+        null,
+        deploymentDir
+      );
+      await execCommand(
+        `cp -r "${foundSourceDir}/"* "${outputDir}/" 2>/dev/null || true`,
+        {},
+        30000,
+        null,
+        deploymentDir
       );
       buildLog += `✅ Fichiers copiés vers ${outputDir}\n`;
 
@@ -852,7 +862,13 @@ async function deployProject(deploymentId, project) {
 
     setTimeout(async () => {
       try {
-        await execCommand(`rm -rf ${deploymentDir}`);
+        await execCommand(
+          `rm -rf ${deploymentDir}`,
+          {},
+          30000,
+          null,
+          deploymentDir
+        );
         console.log(`🧹 Nettoyage terminé: ${deploymentDir}`);
       } catch (error) {
         console.error("❌ Erreur nettoyage:", error);
@@ -883,12 +899,20 @@ async function deployProject(deploymentId, project) {
       .eq("id", deploymentId);
 
     try {
-      await execCommand(`rm -rf ${deploymentDir}`);
+      await execCommand(
+        `rm -rf ${deploymentDir}`,
+        {},
+        30000,
+        null,
+        deploymentDir
+      );
     } catch (cleanupError) {
       console.error("❌ Erreur nettoyage:", cleanupError);
     }
   }
 }
+
+// ==================== FONCTIONS UTILITAIRES ====================
 
 // ==================== FONCTIONS UTILITAIRES ====================
 
@@ -903,10 +927,21 @@ async function updateDeploymentLog(deploymentId, buildLog) {
   }
 }
 
-// deployments.js - REMPLACEZ la fonction execCommand
-function execCommand(command, envVars = {}, timeout = 300000, cwd = null) {
+// ✅ CORRECTION: Fonction execCommand avec deploymentDir en paramètre
+function execCommand(
+  command,
+  envVars = {},
+  timeout = 300000,
+  cwd = null,
+  deploymentDir = null
+) {
   return new Promise((resolve, reject) => {
-    const currentDir = cwd || deploymentDir;
+    // ✅ CORRECTION: Utiliser cwd OU deploymentDir, avec fallback sécurisé
+    const currentDir = cwd || deploymentDir || process.cwd();
+
+    if (!currentDir) {
+      return reject(new Error("Aucun répertoire de travail spécifié"));
+    }
 
     // ✅ PATH CRITIQUE: Inclure node_modules/.bin du projet
     const nodeBinPath = path.join(currentDir, "node_modules", ".bin");
@@ -914,11 +949,11 @@ function execCommand(command, envVars = {}, timeout = 300000, cwd = null) {
 
     const options = {
       timeout,
-      cwd: currentDir, // ✅ Toujours spécifier le CWD
+      cwd: currentDir,
       env: {
         ...process.env,
         ...envVars,
-        PATH: customPath, // ✅ PATH personnalisé
+        PATH: customPath,
         NODE_ENV: "production",
       },
       maxBuffer: 10 * 1024 * 1024,
