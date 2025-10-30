@@ -441,56 +441,6 @@ async function deployProject(deploymentId, project) {
       }
     }
 
-    // Setup des frameworks
-    const { buildLog: setupLog, missingDeps } =
-      await frameworkHandler.setupFrameworks(
-        deploymentDir,
-        detectedFrameworks,
-        buildLog
-      );
-    buildLog = setupLog;
-
-    // ==================== DÉTECTION ET CONFIGURATION ====================
-    buildLog += `🔍 [${new Date().toISOString()}] Détection des frameworks...\n`;
-    await updateDeploymentLog(deploymentId, buildLog);
-
-    const frameworkHandler = new UniversalFrameworkHandler();
-
-    const {
-      frameworks: detectedFrameworks,
-      configs: frameworkConfigs,
-      log: detectionLog,
-    } = await frameworkHandler.detectFrameworks(deploymentDir);
-    buildLog += detectionLog;
-
-    let finalBuildCommand = project.build_command;
-    let finalOutputDir = project.output_dir || "dist";
-    let finalInstallCommand = project.install_command || "npm install";
-
-    if (frameworkConfigs.length > 0) {
-      primaryFramework = frameworkConfigs[0];
-      buildLog += `🎯 Framework principal détecté: ${
-        primaryFramework.name
-      } (${Math.round(primaryFramework.confidence * 100)}%)\n`;
-
-      if (!project.build_command || project.build_command === "npm run build") {
-        finalBuildCommand = primaryFramework.config.buildCommand;
-        buildLog += `🔧 Commande de build automatique: ${finalBuildCommand}\n`;
-      }
-
-      if (!project.output_dir || project.output_dir === "dist") {
-        finalOutputDir = primaryFramework.config.outputDir;
-        buildLog += `📁 Dossier de sortie automatique: ${finalOutputDir}\n`;
-      }
-
-      if (
-        !project.install_command ||
-        project.install_command === "npm install"
-      ) {
-        finalInstallCommand = primaryFramework.config.installCommand;
-      }
-    }
-
     // Setup des frameworks (crée configs, modifie package.json)
     const { buildLog: setupLog } = await frameworkHandler.setupFrameworks(
       deploymentDir,
