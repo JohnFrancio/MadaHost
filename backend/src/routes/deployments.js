@@ -399,6 +399,7 @@ async function deployProject(deploymentId, project) {
     } catch (error) {
       buildLog += `⚠️ Impossible de récupérer le commit hash\n`;
     }
+    // Dans deployments.js - Remplacer TOUTE la section depuis la détection jusqu'au build
 
     // ==================== DÉTECTION DES FRAMEWORKS ====================
     buildLog += `🔍 [${new Date().toISOString()}] Détection des frameworks...\n`;
@@ -415,7 +416,6 @@ async function deployProject(deploymentId, project) {
 
     let finalBuildCommand = project.build_command;
     let finalOutputDir = project.output_dir || "dist";
-    let finalInstallCommand = project.install_command || "npm install";
 
     if (frameworkConfigs.length > 0) {
       primaryFramework = frameworkConfigs[0];
@@ -434,14 +434,72 @@ async function deployProject(deploymentId, project) {
       }
     }
 
-    // ✅ IMPORTANT : Ne PAS modifier le package.json ni créer de vite.config
-    // On laisse le projet utiliser sa propre configuration
+    // Setup frameworks (Tailwind configs uniquement)
     const { buildLog: setupLog } = await frameworkHandler.setupFrameworks(
       deploymentDir,
       detectedFrameworks,
       buildLog
     );
     buildLog = setupLog;
+
+    // ==================== VÉRIFICATION ET MODIFICATION PACKAGE.JSON ====================
+    try {
+      const packageJsonPath = path.join(deploymentDir, "package.json");
+      const packageJson = JSON.parse(
+        await fs.readFile(packageJsonPath, "utf8")
+      );
+
+      buildLog += `📋 Vérification du package.json...\n`;
+
+      const deps = packageJson.dependencies || {};
+      const devDeps = packageJson.devDependencies || {};
+      const allDeps = { ...deps, ...devDeps };
+
+      let needsUpdate = false;
+
+      // ✅ AJOUTER VITE SI MANQUANT
+      if (
+        (detectedFrameworks.includes("react") ||
+          detectedFrameworks.includes("vue")) &&
+        !allDeps.vite
+      ) {
+        buildLog += `⚠️ Vite manquant, ajout au package.json...\n`;
+
+        if (!packageJson.devDependencies) packageJson.devDependencies = {};
+
+        packageJson.devDependencies.vite = "^5.0.0";
+
+        if (
+          detectedFrameworks.includes("react") &&
+          !allDeps["@vitejs/plugin-react"]
+        ) {
+          packageJson.devDependencies["@vitejs/plugin-react"] = "^4.2.0";
+        }
+        if (
+          detectedFrameworks.includes("vue") &&
+          !allDeps["@vitejs/plugin-vue"]
+        ) {
+          packageJson.devDependencies["@vitejs/plugin-vue"] = "^5.0.0";
+        }
+
+        needsUpdate = true;
+        buildLog += `✅ Vite et plugins ajoutés\n`;
+      }
+
+      if (needsUpdate) {
+        await fs.writeFile(
+          packageJsonPath,
+          JSON.stringify(packageJson, null, 2)
+        );
+        buildLog += `💾 package.json mis à jour\n`;
+      } else {
+        buildLog += `✅ Toutes les dépendances nécessaires sont déclarées\n`;
+      }
+
+      await updateDeploymentLog(deploymentId, buildLog);
+    } catch (error) {
+      buildLog += `⚠️ Erreur modification package.json: ${error.message}\n`;
+    }
 
     // ==================== INSTALLATION DES DÉPENDANCES ====================
     await supabase
@@ -454,51 +512,63 @@ async function deployProject(deploymentId, project) {
       await fs.access(packageJsonPath);
 
       buildLog += `📦 [${new Date().toISOString()}] Installation des dépendances...\n`;
+      buildLog += `🔧 Exécution: npm install\n`;
       await updateDeploymentLog(deploymentId, buildLog);
 
-      buildLog += `🔧 Commande d'installation: npm install\n`;
-
-      // ✅ Installation simple avec le package.json original
       const installOutput = await execCommand(
         `cd ${deploymentDir} && npm install`,
         { NODE_ENV: "production" },
-        300000 // 5 minutes timeout
+        300000 // 5 minutes
       );
 
       buildLog += `✅ Dépendances installées avec succès\n`;
 
-      // Vérifier que le dossier node_modules existe
-      try {
-        await fs.access(path.join(deploymentDir, "node_modules"));
-        buildLog += `✅ node_modules créé avec succès\n`;
+      // Vérification
+      const nodeModulesPath = path.join(deploymentDir, "node_modules");
+      await fs.access(nodeModulesPath);
+      buildLog += `✅ node_modules créé\n`;
 
-        // Lister quelques packages clés pour debug
-        const nodeModulesContent = await execCommand(
-          `cd ${deploymentDir} && ls node_modules | grep -E "^(vite|react|vue)$" | head -5`,
-          {},
-          5000
-        );
-        if (nodeModulesContent.trim()) {
-          buildLog += `📦 Packages détectés: ${nodeModulesContent
-            .trim()
-            .replace(/\n/g, ", ")}\n`;
+      // Vérifier Vite spécifiquement
+      if (
+        detectedFrameworks.includes("react") ||
+        detectedFrameworks.includes("vue")
+      ) {
+        try {
+          const viteBinPath = path.join(nodeModulesPath, ".bin", "vite");
+          await fs.access(viteBinPath);
+          buildLog += `✅ Binaire Vite trouvé\n`;
+        } catch {
+          buildLog += `❌ Binaire Vite NON trouvé après installation!\n`;
+
+          // Dernière tentative : installation forcée
+          buildLog += `🔄 Installation forcée de Vite...\n`;
+          try {
+            await execCommand(
+              `cd ${deploymentDir} && npm install vite @vitejs/plugin-react --save-dev --force`,
+              {},
+              60000
+            );
+            buildLog += `✅ Vite installé en force\n`;
+          } catch (forceError) {
+            buildLog += `❌ Installation forcée échouée: ${forceError.message}\n`;
+          }
         }
-      } catch (e) {
-        buildLog += `⚠️ Impossible de vérifier node_modules\n`;
       }
+
+      await updateDeploymentLog(deploymentId, buildLog);
     } catch (error) {
       buildLog += `❌ Erreur installation: ${error.message}\n`;
+      await updateDeploymentLog(deploymentId, buildLog);
       throw error;
     }
 
     // ==================== BUILD DU PROJET ====================
     if (finalBuildCommand && finalBuildCommand !== "") {
       buildLog += `🏗️ [${new Date().toISOString()}] Build du projet...\n`;
-      buildLog += `🔧 Commande de build: ${finalBuildCommand}\n`;
+      buildLog += `🔧 Commande: ${finalBuildCommand}\n`;
       await updateDeploymentLog(deploymentId, buildLog);
 
       try {
-        // ✅ CRUCIAL : Ajouter node_modules/.bin au PATH
         const nodeBinPath = path.join(deploymentDir, "node_modules", ".bin");
 
         let buildEnv = {
@@ -510,84 +580,363 @@ async function deployProject(deploymentId, project) {
 
         if (primaryFramework) {
           buildEnv = { ...buildEnv, ...primaryFramework.config.env };
-
-          if (primaryFramework.name === "vue") {
-            buildEnv.VUE_APP_NODE_ENV = "production";
-          } else if (primaryFramework.name === "react") {
-            buildEnv.REACT_APP_NODE_ENV = "production";
-          } else if (primaryFramework.name === "nextjs") {
-            buildEnv.NEXT_TELEMETRY_DISABLED = "1";
-          }
         }
 
-        // ✅ Utiliser directement le script npm (pas npx)
         const buildOutput = await execCommand(
           `cd ${deploymentDir} && npm run build`,
           buildEnv,
-          600000 // 10 minutes timeout
+          600000 // 10 minutes
         );
 
-        buildLog += `✅ Build réussi avec ${
-          primaryFramework?.name || "configuration par défaut"
-        }\n`;
+        buildLog += `✅ Build réussi\n`;
       } catch (buildError) {
         buildLog += `⚠️ Build échoué: ${buildError.message}\n`;
+        buildLog += `🔄 Tentative avec binaire direct...\n`;
 
-        // Fallback 1 : Essayer avec le binaire direct
-        buildLog += `🔄 Tentative avec le binaire direct...\n`;
         try {
           const nodeBinPath = path.join(deploymentDir, "node_modules", ".bin");
+          const viteBin = path.join(nodeBinPath, "vite");
+
+          // Vérifier que le binaire existe
+          await fs.access(viteBin);
+
           const fallbackEnv = {
             NODE_ENV: "production",
             PATH: `${nodeBinPath}:${process.env.PATH}`,
           };
 
-          // Essayer de trouver le bon binaire
-          let buildBinary = "vite";
-          if (primaryFramework?.name === "nextjs") {
-            buildBinary = "next";
-          }
-
           await execCommand(
-            `cd ${deploymentDir} && ${nodeBinPath}/${buildBinary} build`,
+            `cd ${deploymentDir} && ${viteBin} build`,
             fallbackEnv,
             600000
           );
 
           buildLog += `✅ Build réussi avec binaire direct\n`;
         } catch (fallbackError) {
-          buildLog += `❌ Fallback échoué: ${fallbackError.message}\n`;
-
-          // Fallback 2 : Essayer sans minification
-          buildLog += `🔄 Tentative sans minification...\n`;
-          try {
-            const nodeBinPath = path.join(
-              deploymentDir,
-              "node_modules",
-              ".bin"
-            );
-            const noMinifyEnv = {
-              NODE_ENV: "production",
-              PATH: `${nodeBinPath}:${process.env.PATH}`,
-            };
-
-            await execCommand(
-              `cd ${deploymentDir} && ${nodeBinPath}/vite build --minify false`,
-              noMinifyEnv,
-              600000
-            );
-
-            buildLog += `✅ Build réussi sans minification\n`;
-          } catch (noMinifyError) {
-            buildLog += `❌ Tous les builds ont échoué\n`;
-            buildLog += `📋 Dernière erreur: ${noMinifyError.message}\n`;
-            throw buildError; // Relancer l'erreur originale
-          }
+          buildLog += `❌ Build échoué définitivement\n`;
+          buildLog += `📋 Erreur: ${fallbackError.message}\n`;
+          throw buildError;
         }
       }
     } else {
-      buildLog += `ℹ️ Aucune commande de build spécifiée, copie directe des fichiers\n`;
+      buildLog += `ℹ️ Aucune commande de build\n`;
     }
+    // ==================== DÉTECTION DES FRAMEWORKS ====================
+    // buildLog += `🔍 [${new Date().toISOString()}] Détection des frameworks...\n`;
+    // await updateDeploymentLog(deploymentId, buildLog);
+
+    // const frameworkHandler = new UniversalFrameworkHandler();
+
+    // const {
+    //   frameworks: detectedFrameworks,
+    //   configs: frameworkConfigs,
+    //   log: detectionLog,
+    // } = await frameworkHandler.detectFrameworks(deploymentDir);
+    // buildLog += detectionLog;
+
+    // let finalBuildCommand = project.build_command;
+    // let finalOutputDir = project.output_dir || "dist";
+    // let finalInstallCommand = project.install_command || "npm install";
+
+    // if (frameworkConfigs.length > 0) {
+    //   primaryFramework = frameworkConfigs[0];
+    //   buildLog += `🎯 Framework principal détecté: ${
+    //     primaryFramework.name
+    //   } (${Math.round(primaryFramework.confidence * 100)}%)\n`;
+
+    //   if (!project.build_command || project.build_command === "npm run build") {
+    //     finalBuildCommand = primaryFramework.config.buildCommand;
+    //     buildLog += `🔧 Commande de build automatique: ${finalBuildCommand}\n`;
+    //   }
+
+    //   if (!project.output_dir || project.output_dir === "dist") {
+    //     finalOutputDir = primaryFramework.config.outputDir;
+    //     buildLog += `📁 Dossier de sortie automatique: ${finalOutputDir}\n`;
+    //   }
+    // }
+
+    // // ✅ IMPORTANT : Ne PAS modifier le package.json ni créer de vite.config
+    // // On laisse le projet utiliser sa propre configuration
+    // const { buildLog: setupLog } = await frameworkHandler.setupFrameworks(
+    //   deploymentDir,
+    //   detectedFrameworks,
+    //   buildLog
+    // );
+    // buildLog = setupLog;
+
+    // // ==================== DEBUG PACKAGE.JSON ====================
+    // try {
+    //   const packageJsonPath = path.join(deploymentDir, "package.json");
+    //   const packageJson = JSON.parse(
+    //     await fs.readFile(packageJsonPath, "utf8")
+    //   );
+
+    //   buildLog += `📋 Analyse du package.json:\n`;
+
+    //   // Afficher les dépendances
+    //   const deps = packageJson.dependencies || {};
+    //   const devDeps = packageJson.devDependencies || {};
+    //   const allDeps = { ...deps, ...devDeps };
+
+    //   buildLog += `   Dependencies: ${Object.keys(deps).length} packages\n`;
+    //   buildLog += `   DevDependencies: ${
+    //     Object.keys(devDeps).length
+    //   } packages\n`;
+
+    //   // Vérifier si Vite est présent
+    //   if (allDeps.vite) {
+    //     buildLog += `   ✅ Vite déclaré: ${allDeps.vite}\n`;
+    //   } else {
+    //     buildLog += `   ❌ Vite NON déclaré dans package.json\n`;
+    //     buildLog += `   🔧 Vite sera ajouté automatiquement\n`;
+
+    //     // ✅ AJOUTER VITE AU PACKAGE.JSON
+    //     if (!packageJson.devDependencies) packageJson.devDependencies = {};
+
+    //     if (detectedFrameworks.includes("react")) {
+    //       packageJson.devDependencies.vite = "^5.0.0";
+    //       packageJson.devDependencies["@vitejs/plugin-react"] = "^4.2.0";
+    //       buildLog += `   ➕ Ajout: vite@^5.0.0, @vitejs/plugin-react@^4.2.0\n`;
+    //     } else if (detectedFrameworks.includes("vue")) {
+    //       packageJson.devDependencies.vite = "^5.0.0";
+    //       packageJson.devDependencies["@vitejs/plugin-vue"] = "^5.0.0";
+    //       buildLog += `   ➕ Ajout: vite@^5.0.0, @vitejs/plugin-vue@^5.0.0\n`;
+    //     }
+
+    //     // Sauvegarder le package.json modifié
+    //     await fs.writeFile(
+    //       packageJsonPath,
+    //       JSON.stringify(packageJson, null, 2)
+    //     );
+    //     buildLog += `   💾 package.json mis à jour\n`;
+    //   }
+
+    //   // Afficher les scripts
+    //   const scripts = packageJson.scripts || {};
+    //   buildLog += `   Scripts disponibles: ${Object.keys(scripts).join(
+    //     ", "
+    //   )}\n`;
+    //   if (scripts.build) {
+    //     buildLog += `   📜 Script build: "${scripts.build}"\n`;
+    //   }
+
+    //   await updateDeploymentLog(deploymentId, buildLog);
+    // } catch (error) {
+    //   buildLog += `⚠️ Erreur analyse package.json: ${error.message}\n`;
+    // }
+
+    // // ==================== INSTALLATION DES DÉPENDANCES ====================
+    // await supabase
+    //   .from("deployments")
+    //   .update({ status: "building", build_log: buildLog })
+    //   .eq("id", deploymentId);
+
+    // const packageJsonPath = path.join(deploymentDir, "package.json");
+    // try {
+    //   await fs.access(packageJsonPath);
+
+    //   buildLog += `📦 [${new Date().toISOString()}] Installation des dépendances...\n`;
+    //   await updateDeploymentLog(deploymentId, buildLog);
+
+    //   // ✅ ÉTAPE 1 : Installation normale
+    //   buildLog += `🔧 Commande d'installation: npm install\n`;
+
+    //   const installOutput = await execCommand(
+    //     `cd ${deploymentDir} && npm install`,
+    //     { NODE_ENV: "production" },
+    //     300000 // 5 minutes
+    //   );
+
+    //   buildLog += `✅ Dépendances de base installées\n`;
+
+    //   // ✅ ÉTAPE 2 : Vérifier et installer Vite si nécessaire
+    //   let viteInstalled = false;
+    //   try {
+    //     await fs.access(path.join(deploymentDir, "node_modules", "vite"));
+    //     viteInstalled = true;
+    //     buildLog += `✅ Vite trouvé dans node_modules\n`;
+    //   } catch {
+    //     buildLog += `⚠️ Vite non trouvé dans node_modules\n`;
+    //   }
+
+    //   // ✅ ÉTAPE 3 : Si Vite manque ET qu'on a détecté React/Vue, l'installer
+    //   if (
+    //     !viteInstalled &&
+    //     (detectedFrameworks.includes("react") ||
+    //       detectedFrameworks.includes("vue"))
+    //   ) {
+    //     buildLog += `🔧 Installation forcée de Vite et plugins...\n`;
+    //     await updateDeploymentLog(deploymentId, buildLog);
+
+    //     let vitePackages = ["vite"];
+
+    //     if (detectedFrameworks.includes("react")) {
+    //       vitePackages.push("@vitejs/plugin-react");
+    //     } else if (detectedFrameworks.includes("vue")) {
+    //       vitePackages.push("@vitejs/plugin-vue");
+    //     }
+
+    //     try {
+    //       const viteInstallOutput = await execCommand(
+    //         `cd ${deploymentDir} && npm install ${vitePackages.join(
+    //           " "
+    //         )} --save-dev`,
+    //         { NODE_ENV: "production" },
+    //         120000 // 2 minutes
+    //       );
+    //       buildLog += `✅ Vite installé avec succès: ${vitePackages.join(
+    //         ", "
+    //       )}\n`;
+    //       viteInstalled = true;
+    //     } catch (viteError) {
+    //       buildLog += `⚠️ Erreur installation Vite: ${viteError.message}\n`;
+    //     }
+    //   }
+
+    //   // ✅ ÉTAPE 4 : Vérification finale
+    //   try {
+    //     await fs.access(path.join(deploymentDir, "node_modules"));
+    //     buildLog += `✅ node_modules créé avec succès\n`;
+
+    //     // Lister les packages importants
+    //     const checkPackages = ["vite", "react", "vue", "next"].join("|");
+    //     const nodeModulesContent = await execCommand(
+    //       `cd ${deploymentDir} && ls node_modules 2>/dev/null | grep -E "^(${checkPackages})$" || echo "aucun"`,
+    //       {},
+    //       5000
+    //     );
+
+    //     const foundPackages = nodeModulesContent
+    //       .trim()
+    //       .split("\n")
+    //       .filter((p) => p && p !== "aucun");
+    //     if (foundPackages.length > 0) {
+    //       buildLog += `📦 Packages détectés: ${foundPackages.join(", ")}\n`;
+    //     }
+
+    //     // Vérifier spécifiquement Vite
+    //     if (viteInstalled) {
+    //       try {
+    //         const vitePath = path.join(
+    //           deploymentDir,
+    //           "node_modules",
+    //           ".bin",
+    //           "vite"
+    //         );
+    //         await fs.access(vitePath);
+    //         buildLog += `✅ Binaire Vite trouvé: ${vitePath}\n`;
+    //       } catch {
+    //         buildLog += `⚠️ Binaire Vite non trouvé dans .bin/\n`;
+    //       }
+    //     }
+    //   } catch (e) {
+    //     buildLog += `⚠️ Impossible de vérifier node_modules: ${e.message}\n`;
+    //   }
+
+    //   await updateDeploymentLog(deploymentId, buildLog);
+    // } catch (error) {
+    //   buildLog += `❌ Erreur installation: ${error.message}\n`;
+    //   await updateDeploymentLog(deploymentId, buildLog);
+    //   throw error;
+    // }
+
+    // // ==================== BUILD DU PROJET ====================
+    // if (finalBuildCommand && finalBuildCommand !== "") {
+    //   buildLog += `🏗️ [${new Date().toISOString()}] Build du projet...\n`;
+    //   buildLog += `🔧 Commande de build: ${finalBuildCommand}\n`;
+    //   await updateDeploymentLog(deploymentId, buildLog);
+
+    //   try {
+    //     // ✅ CRUCIAL : Ajouter node_modules/.bin au PATH
+    //     const nodeBinPath = path.join(deploymentDir, "node_modules", ".bin");
+
+    //     let buildEnv = {
+    //       NODE_ENV: "production",
+    //       CI: "true",
+    //       GENERATE_SOURCEMAP: "false",
+    //       PATH: `${nodeBinPath}:${process.env.PATH}`,
+    //     };
+
+    //     if (primaryFramework) {
+    //       buildEnv = { ...buildEnv, ...primaryFramework.config.env };
+
+    //       if (primaryFramework.name === "vue") {
+    //         buildEnv.VUE_APP_NODE_ENV = "production";
+    //       } else if (primaryFramework.name === "react") {
+    //         buildEnv.REACT_APP_NODE_ENV = "production";
+    //       } else if (primaryFramework.name === "nextjs") {
+    //         buildEnv.NEXT_TELEMETRY_DISABLED = "1";
+    //       }
+    //     }
+
+    //     // ✅ Utiliser directement le script npm (pas npx)
+    //     const buildOutput = await execCommand(
+    //       `cd ${deploymentDir} && npm run build`,
+    //       buildEnv,
+    //       600000 // 10 minutes timeout
+    //     );
+
+    //     buildLog += `✅ Build réussi avec ${
+    //       primaryFramework?.name || "configuration par défaut"
+    //     }\n`;
+    //   } catch (buildError) {
+    //     buildLog += `⚠️ Build échoué: ${buildError.message}\n`;
+
+    //     // Fallback 1 : Essayer avec le binaire direct
+    //     buildLog += `🔄 Tentative avec le binaire direct...\n`;
+    //     try {
+    //       const nodeBinPath = path.join(deploymentDir, "node_modules", ".bin");
+    //       const fallbackEnv = {
+    //         NODE_ENV: "production",
+    //         PATH: `${nodeBinPath}:${process.env.PATH}`,
+    //       };
+
+    //       // Essayer de trouver le bon binaire
+    //       let buildBinary = "vite";
+    //       if (primaryFramework?.name === "nextjs") {
+    //         buildBinary = "next";
+    //       }
+
+    //       await execCommand(
+    //         `cd ${deploymentDir} && ${nodeBinPath}/${buildBinary} build`,
+    //         fallbackEnv,
+    //         600000
+    //       );
+
+    //       buildLog += `✅ Build réussi avec binaire direct\n`;
+    //     } catch (fallbackError) {
+    //       buildLog += `❌ Fallback échoué: ${fallbackError.message}\n`;
+
+    //       // Fallback 2 : Essayer sans minification
+    //       buildLog += `🔄 Tentative sans minification...\n`;
+    //       try {
+    //         const nodeBinPath = path.join(
+    //           deploymentDir,
+    //           "node_modules",
+    //           ".bin"
+    //         );
+    //         const noMinifyEnv = {
+    //           NODE_ENV: "production",
+    //           PATH: `${nodeBinPath}:${process.env.PATH}`,
+    //         };
+
+    //         await execCommand(
+    //           `cd ${deploymentDir} && ${nodeBinPath}/vite build --minify false`,
+    //           noMinifyEnv,
+    //           600000
+    //         );
+
+    //         buildLog += `✅ Build réussi sans minification\n`;
+    //       } catch (noMinifyError) {
+    //         buildLog += `❌ Tous les builds ont échoué\n`;
+    //         buildLog += `📋 Dernière erreur: ${noMinifyError.message}\n`;
+    //         throw buildError; // Relancer l'erreur originale
+    //       }
+    //     }
+    //   }
+    // } else {
+    //   buildLog += `ℹ️ Aucune commande de build spécifiée, copie directe des fichiers\n`;
+    // }
 
     // ==================== DÉPLOIEMENT DES FICHIERS ====================
     await supabase
