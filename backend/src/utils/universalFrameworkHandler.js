@@ -1,11 +1,10 @@
-// backend/src/utils/universalFrameworkHandler.js - VERSION CORRIGÉE
+// backend/src/utils/universalFrameworkHandler.js - VERSION FINALE
 const fs = require("fs").promises;
 const path = require("path");
 
 class UniversalFrameworkHandler {
   constructor() {
     this.supportedFrameworks = {
-      // Frameworks JS - ORDRE DE PRIORITÉ IMPORTANT
       nextjs: {
         dependencies: ["next", "react", "react-dom"],
         configFiles: ["next.config.js", "next.config.mjs"],
@@ -67,7 +66,6 @@ class UniversalFrameworkHandler {
         },
       },
 
-      // CSS Frameworks
       tailwind: {
         dependencies: ["tailwindcss", "autoprefixer", "postcss"],
         configFiles: ["tailwind.config.js"],
@@ -100,10 +98,9 @@ class UniversalFrameworkHandler {
 
       buildLog += `📦 Analyse des dépendances package.json...\n`;
 
-      // ✅ CORRECTION : Détecter le framework RÉEL
       let mainFramework = null;
 
-      // 1. Vérifier Next.js (doit avoir "next" ET les scripts Next.js)
+      // Détecter Next.js
       if (allDeps["next"]) {
         if (
           scripts.build?.includes("next") ||
@@ -115,19 +112,18 @@ class UniversalFrameworkHandler {
         }
       }
 
-      // 2. Vérifier Vue.js
+      // Détecter Vue.js
       if (!mainFramework && allDeps["vue"]) {
         mainFramework = "vue";
         buildLog += `🎯 Framework JS principal détecté: vue\n`;
       }
 
-      // 3. Vérifier React (MAIS PAS si Next.js est détecté)
+      // Détecter React
       if (!mainFramework && allDeps["react"] && !allDeps["next"]) {
         mainFramework = "react";
         buildLog += `🎯 Framework JS principal détecté: react\n`;
       }
 
-      // Ajouter le framework détecté
       if (mainFramework) {
         detectedFrameworks.add(mainFramework);
         frameworkConfigs.push({
@@ -157,17 +153,14 @@ class UniversalFrameworkHandler {
   async setupFrameworks(projectPath, frameworks, buildLog = "") {
     buildLog += `🛠️  Configuration des frameworks: ${frameworks.join(", ")}\n`;
 
-    // Installer les dépendances manquantes
-    const missingDeps = await this.installMissingDependencies(
-      projectPath,
-      frameworks,
-      buildLog
-    );
+    // 1. Installer les dépendances manquantes
+    const { missingDeps, needsReinstall } =
+      await this.installMissingDependencies(projectPath, frameworks, buildLog);
 
-    // Créer les fichiers de configuration
+    // 2. Créer les fichiers de configuration
     buildLog = await this.createConfigFiles(projectPath, frameworks, buildLog);
 
-    return { buildLog, missingDeps };
+    return { buildLog, missingDeps, needsReinstall };
   }
 
   async installMissingDependencies(projectPath, frameworks, buildLog) {
@@ -183,6 +176,7 @@ class UniversalFrameworkHandler {
       ...packageJson.devDependencies,
     };
     const missingDeps = [];
+    let needsReinstall = false;
 
     // Vérifier les dépendances selon le framework
     for (const framework of frameworks) {
@@ -217,7 +211,7 @@ class UniversalFrameworkHandler {
         packageJson.devDependencies[dep] = latestVersions[dep] || "latest";
       }
 
-      // ✅ Corriger les scripts pour utiliser npx si nécessaire
+      // Modifier le script build pour utiliser npx (sécurité)
       if (!packageJson.scripts) packageJson.scripts = {};
 
       if (frameworks.includes("react") || frameworks.includes("vue")) {
@@ -226,14 +220,16 @@ class UniversalFrameworkHandler {
           packageJson.scripts.build === "vite build"
         ) {
           packageJson.scripts.build = "npx vite build";
-          buildLog += `🔧 Script build corrigé pour utiliser npx\n`;
+          buildLog += `🔧 Script build modifié pour utiliser npx\n`;
         }
       }
 
       await fs.writeFile(packageJsonPath, JSON.stringify(packageJson, null, 2));
+      needsReinstall = true;
+      buildLog += `📝 package.json mis à jour avec ${missingDeps.length} dépendances\n`;
     }
 
-    return missingDeps;
+    return { missingDeps, needsReinstall };
   }
 
   async createConfigFiles(projectPath, frameworks, buildLog) {
@@ -303,7 +299,6 @@ export default {
     } else if (frameworks.includes("react")) {
       pluginImports.push("import react from '@vitejs/plugin-react'");
       plugins.push("react()");
-      outputDir = "dist"; // React avec Vite utilise "dist"
     }
 
     const config = `import { defineConfig } from 'vite'
