@@ -6,7 +6,6 @@ RUN apk add --no-cache \
     git \
     bash \
     python3 \
-    npm install -g vite@latest \
     make \
     g++
 
