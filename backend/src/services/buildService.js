@@ -284,15 +284,23 @@ class BuildService {
    */
   // buildService.js - Méthode executeCommand (ligne ~300)
 
+  // buildService.js - Méthode executeCommand corrigée
   async executeCommand(command, cwd, env = {}) {
     return new Promise((resolve, reject) => {
-      // ✅ CORRECTION : Ajouter node_modules/.bin au PATH
+      // ✅ CORRECTION: Chemin absolu pour node_modules/.bin
       const nodeBinPath = path.join(cwd, "node_modules", ".bin");
       const childEnv = {
         ...process.env,
         ...env,
-        PATH: `${nodeBinPath}:${process.env.PATH}`, // ✅ CRUCIAL
+        PATH: `${nodeBinPath}:${process.env.PATH}`,
+        // ✅ Variables critiques pour npm
+        npm_config_cache: "/tmp/npm_cache",
+        NODE_ENV: env.NODE_ENV || "production",
       };
+
+      console.log(`🔧 Exécution: ${command}`);
+      console.log(`📁 CWD: ${cwd}`);
+      console.log(`🔧 PATH: ${childEnv.PATH}`);
 
       const child = spawn("sh", ["-c", command], {
         cwd,
@@ -304,19 +312,24 @@ class BuildService {
       let stderr = "";
 
       child.stdout.on("data", (data) => {
-        stdout += data.toString();
-        console.log(`📋 ${data.toString().trim()}`);
+        const output = data.toString();
+        stdout += output;
+        console.log(`📋 ${output.trim()}`);
       });
 
       child.stderr.on("data", (data) => {
-        stderr += data.toString();
-        console.log(`⚠️  ${data.toString().trim()}`);
+        const output = data.toString();
+        stderr += output;
+        console.log(`⚠️  ${output.trim()}`);
       });
 
       child.on("close", (code) => {
         if (code === 0) {
+          console.log(`✅ Commande réussie: ${command}`);
           resolve({ stdout, stderr });
         } else {
+          console.error(`❌ Commande échouée (${code}): ${command}`);
+          console.error(`📋 Stderr: ${stderr}`);
           reject(
             new Error(`Command failed with code ${code}: ${stderr || stdout}`)
           );
@@ -324,8 +337,17 @@ class BuildService {
       });
 
       child.on("error", (error) => {
+        console.error(`💥 Erreur execution: ${error.message}`);
         reject(new Error(`Execution error: ${error.message}`));
       });
+
+      // Timeout de sécurité
+      setTimeout(() => {
+        if (child.exitCode === null) {
+          child.kill();
+          reject(new Error(`Command timeout: ${command}`));
+        }
+      }, 600000); // 10 minutes
     });
   }
 
