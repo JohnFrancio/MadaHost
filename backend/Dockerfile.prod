@@ -1,14 +1,13 @@
-# backend/Dockerfile.prod - AVEC NPM COMPATIBLE
+# backend/Dockerfile.prod - VERSION CORRIGÉE
 FROM node:18-alpine
 
-# ✅ INSTALLER NPM v10 (compatible avec Node 18)
+# ✅ INSTALLER LES OUTILS SANS METTRE À JOUR NPM (garder la version compatible)
 RUN apk add --no-cache \
     git \
     bash \
     python3 \
     make \
     g++ \
-    && npm install -g npm@10.9.2 \
     && npm cache clean --force
 
 WORKDIR /backend
@@ -22,7 +21,7 @@ RUN npm ci --only=production --no-audit --no-fund
 # Copier le code source
 COPY . .
 
-# Créer les dossiers avec permissions
+# ✅ CRÉER LES DOSSIERS AVEC PERMISSIONS
 RUN mkdir -p /var/www/deployed /backend/temp /backend/builds /backend/public /backend/logs \
     && chown -R node:node /var/www/deployed /backend/temp /backend/builds /backend/public /backend/logs \
     && chmod -R 755 /var/www/deployed /backend/temp /backend/builds /backend/public
@@ -30,7 +29,7 @@ RUN mkdir -p /var/www/deployed /backend/temp /backend/builds /backend/public /ba
 # Exposer le port
 EXPOSE 3001
 
-# Utiliser l'utilisateur non-root
+# ✅ CHANGER VERS L'UTILISATEUR NON-ROOT
 USER node
 
 # Démarrer le serveur
