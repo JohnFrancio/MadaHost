@@ -1,8 +1,9 @@
-# backend/Dockerfile.prod
+# backend/Dockerfile.prod - VERSION OPTIMISÉE
 FROM node:18-alpine
 
-# ✅ Installer Git et autres outils nécessaires
-RUN apk add --no-cache git bash
+# ✅ Installer Git et VITE GLOBALEMENT
+RUN apk add --no-cache git bash && \
+    npm install -g vite@^6.0.0
 
 WORKDIR /backend
 
@@ -25,7 +26,6 @@ RUN mkdir -p /var/www/deployed && \
     chown -R node:node /backend/temp && \
     chown -R node:node /backend/builds && \
     chown -R node:node /backend/public && \
-    chown -R node:node /backend/logs && \
     chmod -R 755 /var/www/deployed && \
     chmod -R 755 /backend/temp && \
     chmod -R 755 /backend/builds && \
