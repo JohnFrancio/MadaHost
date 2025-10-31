@@ -331,8 +331,8 @@ async function deployProject(deploymentId, project) {
   let buildLog = "";
   let primaryFramework = null;
 
-  // ✅ CORRECTION: Utiliser process.cwd() au lieu de __dirname
-  const deploymentDir = path.join(process.cwd(), "temp", deploymentId);
+  // ✅ CORRECTION: Chemin ABSOLU explicite au lieu de process.cwd()
+  const deploymentDir = path.join("/app", "temp", deploymentId);
   const subdomain = project.name.toLowerCase().replace(/[^a-z0-9]/g, "-");
   const outputDir = path.join("/var/www/deployments", subdomain);
 
@@ -342,7 +342,22 @@ async function deployProject(deploymentId, project) {
     }\n`;
     buildLog += `📁 Temp dir: ${deploymentDir}\n`;
     buildLog += `📁 Output dir: ${outputDir}\n`;
+
+    // ✅ AJOUT: Logs de débogage pour vérifier les chemins
+    console.log(`🔍 [DEBUG] Deployment ID: ${deploymentId}`);
+    console.log(`🔍 [DEBUG] Deployment Dir: ${deploymentDir}`);
+    console.log(`🔍 [DEBUG] Output Dir: ${outputDir}`);
+
     await updateDeploymentLog(deploymentId, buildLog);
+
+    // ✅ VÉRIFIER ET NETTOYER LE DOSSIER SI EXISTE DÉJÀ
+    try {
+      const existingFiles = await fs.readdir(deploymentDir);
+      buildLog += `⚠️ Dossier existe déjà avec ${existingFiles.length} fichiers, nettoyage...\n`;
+      await execCommand(`rm -rf "${deploymentDir}"`);
+    } catch (e) {
+      // Dossier n'existe pas, c'est bon
+    }
 
     // ✅ Créer les dossiers
     await fs.mkdir(deploymentDir, { recursive: true });
@@ -368,7 +383,6 @@ async function deployProject(deploymentId, project) {
       .update({ status: "cloning", build_log: buildLog })
       .eq("id", deploymentId);
 
-    // ✅ CORRECTION: Ajouter gestion d'erreur explicite
     const cloneCommand = `git clone --depth 1 -b ${
       project.branch || "main"
     } https://${user.access_token}@github.com/${
@@ -377,7 +391,7 @@ async function deployProject(deploymentId, project) {
 
     try {
       buildLog += `🔧 Commande: git clone -b ${project.branch || "main"}\n`;
-      await execCommand(cloneCommand, {}, 180000); // 3 minutes max
+      await execCommand(cloneCommand, {}, 180000);
       buildLog += `✅ Repository cloné avec succès\n`;
     } catch (cloneError) {
       buildLog += `❌ Erreur clonage: ${cloneError.message}\n`;
@@ -386,14 +400,24 @@ async function deployProject(deploymentId, project) {
       );
     }
 
-    // ✅ Vérifier que des fichiers existent
+    // ✅ VÉRIFICATION RENFORCÉE du contenu cloné
     try {
       const files = await fs.readdir(deploymentDir);
       buildLog += `📊 ${files.length} fichiers/dossiers dans le repo\n`;
+      buildLog += `📋 Contenu: ${files.join(", ")}\n`; // ✅ AJOUT: Lister les fichiers
 
       if (files.length === 0) {
         throw new Error("Le repository cloné est vide");
       }
+
+      // ✅ VÉRIFICATION: Le dossier contient bien les fichiers du projet
+      const hasPackageJson = files.includes("package.json");
+      const hasSrc =
+        files.includes("src") ||
+        files.includes("app") ||
+        files.includes("pages");
+      buildLog += `📦 package.json présent: ${hasPackageJson}\n`;
+      buildLog += `📁 Dossier src présent: ${hasSrc}\n`;
     } catch (readError) {
       buildLog += `❌ Impossible de lire le dossier cloné: ${readError.message}\n`;
       throw new Error("Le clonage a échoué ou le dossier est vide");
@@ -531,38 +555,62 @@ async function deployProject(deploymentId, project) {
 
     await updateDeploymentLog(deploymentId, buildLog);
 
-    // ✅ Installation avec --legacy-peer-deps pour éviter les conflits
-    await execCommand(
-      `cd ${deploymentDir} && npm install --legacy-peer-deps`,
-      { NODE_ENV: "production" },
-      300000
-    );
-    buildLog += `✅ npm install terminé\n`;
+    // ✅ FORCER l'installation COMPLÈTE des dépendances
+    try {
+      await execCommand(
+        `cd ${deploymentDir} && npm install --legacy-peer-deps`,
+        { NODE_ENV: "production" },
+        300000
+      );
+      buildLog += `✅ npm install terminé\n`;
+    } catch (installError) {
+      buildLog += `❌ Erreur npm install: ${installError.message}\n`;
+      throw new Error(
+        `Installation des dépendances échouée: ${installError.message}`
+      );
+    }
 
-    // ✅ NOUVEAU: Vérification Vite global (plus besoin de l'installer localement)
+    // ✅ FORCER l'installation LOCALE de Vite pour React/Vue
     if (
       primaryFramework &&
       (primaryFramework.name === "react" || primaryFramework.name === "vue")
     ) {
-      try {
-        // Vérifier que Vite est installé globalement
-        const viteVersion = await execCommand("vite --version");
-        buildLog += `✅ Vite disponible globalement: ${viteVersion.trim()}\n`;
-      } catch (error) {
-        buildLog += `⚠️ Vite non disponible globalement, tentative d'installation locale...\n`;
+      buildLog += `📦 Installation explicite de Vite localement...\n`;
 
-        // Fallback: installer localement si global échoue
-        try {
+      try {
+        // Vérifier si Vite est déjà installé localement
+        const viteCheck = await execCommand(
+          `cd ${deploymentDir} && npm list vite 2>/dev/null || echo "NOT_INSTALLED"`
+        );
+
+        if (viteCheck.includes("NOT_INSTALLED")) {
+          buildLog += `🔧 Vite non installé localement, installation...\n`;
           await execCommand(
-            `cd ${deploymentDir} && npm install vite@latest @vitejs/plugin-react@latest @vitejs/plugin-vue@latest --save-dev --legacy-peer-deps`,
+            `cd ${deploymentDir} && npm install vite@latest --save-dev --legacy-peer-deps`,
             {},
             120000
           );
-          buildLog += `✅ Vite installé localement\n`;
-        } catch (installError) {
-          buildLog += `❌ Impossible d'installer Vite: ${installError.message}\n`;
-          throw new Error("Vite non disponible pour le build");
+
+          if (primaryFramework.name === "react") {
+            await execCommand(
+              `cd ${deploymentDir} && npm install @vitejs/plugin-react@latest --save-dev --legacy-peer-deps`,
+              {},
+              120000
+            );
+          } else if (primaryFramework.name === "vue") {
+            await execCommand(
+              `cd ${deploymentDir} && npm install @vitejs/plugin-vue@latest --save-dev --legacy-peer-deps`,
+              {},
+              120000
+            );
+          }
+          buildLog += `✅ Vite installé localement avec succès\n`;
+        } else {
+          buildLog += `✅ Vite déjà installé localement\n`;
         }
+      } catch (viteError) {
+        buildLog += `⚠️ Erreur installation Vite: ${viteError.message}\n`;
+        // Continuer quand même, peut-être que le build fonctionnera
       }
     }
 
@@ -574,36 +622,33 @@ async function deployProject(deploymentId, project) {
     await updateDeploymentLog(deploymentId, buildLog);
 
     try {
-      // ✅ UTILISER VITE GLOBAL dans le PATH
+      // ✅ Utiliser npx pour exécuter les commandes localement
       await execCommand(
         `cd ${deploymentDir} && ${finalBuildCommand}`,
         {
           NODE_ENV: "production",
           CI: "true",
           GENERATE_SOURCEMAP: "false",
-          // ✅ PATH inclut /usr/local/bin où Vite global est installé
-          PATH: `/usr/local/bin:${process.env.PATH}`,
         },
         600000
       );
       buildLog += `✅ Build réussi\n`;
     } catch (buildError) {
       buildLog += `⚠️ Build échoué: ${buildError.message}\n`;
-      buildLog += `🔄 Tentative avec Vite global direct...\n`;
+      buildLog += `🔄 Tentative avec npx...\n`;
 
       try {
-        // ✅ Utiliser directement la commande vite globale
+        // ✅ Utiliser npx pour forcer l'utilisation des binaires locaux
         await execCommand(
-          `cd ${deploymentDir} && vite build`,
+          `cd ${deploymentDir} && npx ${finalBuildCommand}`,
           {
             NODE_ENV: "production",
-            PATH: `/usr/local/bin:${process.env.PATH}`,
           },
           600000
         );
-        buildLog += `✅ Build réussi avec Vite global\n`;
-      } catch (fallbackError) {
-        buildLog += `❌ Tous les builds ont échoué: ${fallbackError.message}\n`;
+        buildLog += `✅ Build réussi avec npx\n`;
+      } catch (npxError) {
+        buildLog += `❌ Tous les builds ont échoué: ${npxError.message}\n`;
         throw buildError;
       }
     }
@@ -677,6 +722,14 @@ async function deployProject(deploymentId, project) {
         completed_at: new Date().toISOString(),
       })
       .eq("id", deploymentId);
+
+    // ✅ NETTOYAGE FINAL du dossier temp
+    try {
+      await execCommand(`rm -rf "${deploymentDir}"`);
+      buildLog += `🧹 Dossier temp nettoyé\n`;
+    } catch (cleanupError) {
+      console.error("❌ Erreur nettoyage final:", cleanupError);
+    }
   } catch (error) {
     console.error(`❌ Erreur déploiement ${deploymentId}:`, error);
     buildLog += `❌ [${new Date().toISOString()}] Erreur: ${error.message}\n`;
