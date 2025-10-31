@@ -1,34 +1,60 @@
-# backend/Dockerfile.prod - VERSION STABLE
+# ========================================
+# Stage 1: Dependencies
+# ========================================
+FROM node:18-alpine AS deps
+
+WORKDIR /app
+
+# Copier les fichiers de dépendances
+COPY package*.json ./
+
+# Installer les dépendances de production uniquement
+RUN npm ci --only=production && \
+    npm cache clean --force
+
+# ========================================
+# Stage 2: Production
+# ========================================
 FROM node:18-alpine
 
-# ✅ INSTALLATION STABLE SANS CONFLITS
+# Installer les outils système nécessaires
 RUN apk add --no-cache \
     git \
     bash \
     python3 \
     make \
-    g++
+    g++ \
+    wget \
+    curl
 
-WORKDIR /backend
+WORKDIR /app
 
-# Copier package files
-COPY package*.json ./
-
-# Installer les dépendances AVANT de copier le code
-RUN npm ci --only=production --no-audit --no-fund
+# Copier les dépendances depuis le stage deps
+COPY --from=deps /app/node_modules ./node_modules
 
 # Copier le code source
 COPY . .
 
-# ✅ CRÉER LES DOSSIERS AVEC L'UTILISATEUR CORRECT
-USER root
-RUN mkdir -p /var/www/deployed /backend/temp /backend/builds /backend/public /backend/logs \
-    && chown -R node:node /var/www/deployed /backend/temp /backend/builds /backend/public /backend/logs \
-    && chmod -R 755 /var/www/deployed /backend/temp /backend/builds /backend/public
+# ✅ INSTALLER VITE ET LES PLUGINS GLOBALEMENT
+# Cela permet aux builds des projets utilisateurs de les utiliser
+RUN npm install -g vite@latest \
+    @vitejs/plugin-react@latest \
+    @vitejs/plugin-vue@latest \
+    && npm cache clean --force
+
+# Créer les répertoires nécessaires avec permissions
+RUN mkdir -p /app/deployments /app/logs /app/temp /var/www/deployed && \
+    chown -R node:node /app /var/www/deployed
+
+# Utilisateur non-root pour la sécurité
 USER node
 
 # Exposer le port
 EXPOSE 3001
 
-# Démarrer le serveur
-CMD ["node", "server.js"]
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
+    CMD wget --no-verbose --tries=1 --spider http://localhost:3001/health || exit 1
+
+# Démarrage de l'application
+CMD ["node", "src/server.js"]

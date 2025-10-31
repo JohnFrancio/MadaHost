@@ -505,72 +505,30 @@ async function deployProject(deploymentId, project) {
     );
     buildLog += `✅ npm install terminé\n`;
 
-    // ✅ VÉRIFICATION VITE
+    // ✅ NOUVEAU: Vérification Vite global (plus besoin de l'installer localement)
     if (
       primaryFramework &&
       (primaryFramework.name === "react" || primaryFramework.name === "vue")
     ) {
-      const viteBinPath = path.join(
-        deploymentDir,
-        "node_modules",
-        ".bin",
-        "vite"
-      );
-
-      let viteInstalled = false;
-
       try {
-        await fs.access(viteBinPath);
-        viteInstalled = true;
-        buildLog += `✅ Vite installé: ${viteBinPath}\n`;
-      } catch {
-        buildLog += `⚠️ Vite manquant après npm install\n`;
-      }
+        // Vérifier que Vite est installé globalement
+        const viteVersion = await execCommand("vite --version");
+        buildLog += `✅ Vite disponible globalement: ${viteVersion.trim()}\n`;
+      } catch (error) {
+        buildLog += `⚠️ Vite non disponible globalement, tentative d'installation locale...\n`;
 
-      if (!viteInstalled) {
-        buildLog += `🔄 Installation forcée de Vite...\n`;
+        // Fallback: installer localement si global échoue
         try {
-          // Installation avec --force pour écraser les versions
           await execCommand(
-            `cd ${deploymentDir} && npm install vite@latest @vitejs/plugin-react@latest --save-dev --force --legacy-peer-deps`,
+            `cd ${deploymentDir} && npm install vite@latest @vitejs/plugin-react@latest @vitejs/plugin-vue@latest --save-dev --legacy-peer-deps`,
             {},
             120000
           );
-
-          // Re-vérifier
-          await fs.access(viteBinPath);
-          buildLog += `✅ Vite installé en force\n`;
-          viteInstalled = true;
-        } catch (forceError) {
-          buildLog += `❌ Installation forcée échouée: ${forceError.message}\n`;
-
-          // Dernière tentative: vérifier si Vite existe dans node_modules (pas dans .bin)
-          try {
-            const viteModulePath = path.join(
-              deploymentDir,
-              "node_modules",
-              "vite"
-            );
-            await fs.access(viteModulePath);
-            buildLog += `✅ Module Vite trouvé dans node_modules, création du lien...\n`;
-
-            // Créer manuellement le lien symbolique
-            const viteBinDir = path.join(deploymentDir, "node_modules", ".bin");
-            await fs.mkdir(viteBinDir, { recursive: true });
-
-            await execCommand(
-              `cd ${deploymentDir} && cd node_modules/.bin && ln -sf ../vite/bin/vite.js vite`
-            );
-            buildLog += `✅ Lien symbolique Vite créé\n`;
-            viteInstalled = true;
-          } catch (linkError) {
-            buildLog += `❌ Impossible de créer le lien Vite: ${linkError.message}\n`;
-          }
+          buildLog += `✅ Vite installé localement\n`;
+        } catch (installError) {
+          buildLog += `❌ Impossible d'installer Vite: ${installError.message}\n`;
+          throw new Error("Vite non disponible pour le build");
         }
-      }
-
-      if (!viteInstalled) {
-        throw new Error("Vite non installé après toutes les tentatives");
       }
     }
 
@@ -582,38 +540,34 @@ async function deployProject(deploymentId, project) {
     await updateDeploymentLog(deploymentId, buildLog);
 
     try {
-      const nodeBinPath = path.join(deploymentDir, "node_modules", ".bin");
-
+      // ✅ UTILISER VITE GLOBAL dans le PATH
       await execCommand(
         `cd ${deploymentDir} && ${finalBuildCommand}`,
         {
           NODE_ENV: "production",
           CI: "true",
           GENERATE_SOURCEMAP: "false",
-          PATH: `${nodeBinPath}:${process.env.PATH}`,
+          // ✅ PATH inclut /usr/local/bin où Vite global est installé
+          PATH: `/usr/local/bin:${process.env.PATH}`,
         },
         600000
       );
       buildLog += `✅ Build réussi\n`;
     } catch (buildError) {
       buildLog += `⚠️ Build échoué: ${buildError.message}\n`;
-      buildLog += `🔄 Tentative avec chemin absolu...\n`;
+      buildLog += `🔄 Tentative avec Vite global direct...\n`;
 
       try {
-        const viteBin = path.join(
-          deploymentDir,
-          "node_modules",
-          ".bin",
-          "vite"
-        );
-        await fs.access(viteBin);
-
+        // ✅ Utiliser directement la commande vite globale
         await execCommand(
-          `cd ${deploymentDir} && ${viteBin} build`,
-          { NODE_ENV: "production" },
+          `cd ${deploymentDir} && vite build`,
+          {
+            NODE_ENV: "production",
+            PATH: `/usr/local/bin:${process.env.PATH}`,
+          },
           600000
         );
-        buildLog += `✅ Build réussi avec chemin absolu\n`;
+        buildLog += `✅ Build réussi avec Vite global\n`;
       } catch (fallbackError) {
         buildLog += `❌ Tous les builds ont échoué: ${fallbackError.message}\n`;
         throw buildError;
