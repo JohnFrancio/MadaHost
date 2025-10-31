@@ -329,21 +329,36 @@ router.delete("/:deploymentId", requireAuth, async (req, res) => {
 
 async function deployProject(deploymentId, project) {
   let buildLog = "";
+  let primaryFramework = null; // ✅ Définir la variable
   const deploymentDir = path.join(__dirname, "../../temp", deploymentId);
   const subdomain = project.name.toLowerCase().replace(/[^a-z0-9]/g, "-");
   const outputDir = path.join("/var/www/deployed", subdomain);
 
   try {
-    buildLog += `🚀 Déploiement de ${project.name}\n`;
+    buildLog += `🚀 [${new Date().toISOString()}] Déploiement de ${
+      project.name
+    }\n`;
+    await updateDeploymentLog(deploymentId, buildLog);
+
     await fs.mkdir(deploymentDir, { recursive: true });
     await fs.mkdir(outputDir, { recursive: true });
 
-    // CLONAGE
+    // ==================== CLONAGE ====================
+    buildLog += `📥 Clonage du repository...\n`;
     const { data: user } = await supabase
       .from("users")
       .select("access_token")
       .eq("id", project.user_id)
       .single();
+
+    if (!user?.access_token) {
+      throw new Error("Token GitHub manquant");
+    }
+
+    await supabase
+      .from("deployments")
+      .update({ status: "cloning", build_log: buildLog })
+      .eq("id", deploymentId);
 
     await execCommand(
       `git clone --depth 1 -b ${project.branch || "main"} https://${
@@ -352,50 +367,249 @@ async function deployProject(deploymentId, project) {
     );
     buildLog += `✅ Repository cloné\n`;
 
-    // INSTALLATION - CRITIQUE
-    buildLog += `📦 Installation des dépendances...\n`;
-
-    // ✅ FORCER VITE DANS PACKAGE.JSON
-    const packageJsonPath = path.join(deploymentDir, "package.json");
-    const packageJson = JSON.parse(await fs.readFile(packageJsonPath, "utf8"));
-
-    if (!packageJson.devDependencies) packageJson.devDependencies = {};
-    if (!packageJson.devDependencies.vite) {
-      packageJson.devDependencies.vite = "^5.2.0";
-      packageJson.devDependencies["@vitejs/plugin-react"] = "^4.3.0";
-      await fs.writeFile(packageJsonPath, JSON.stringify(packageJson, null, 2));
-      buildLog += `✅ Vite ajouté au package.json\n`;
+    // Commit hash
+    try {
+      const commitHash = await execCommand(
+        `cd ${deploymentDir} && git rev-parse HEAD`
+      );
+      await supabase
+        .from("deployments")
+        .update({ commit_hash: commitHash.trim() })
+        .eq("id", deploymentId);
+      buildLog += `📋 Commit: ${commitHash.trim().substring(0, 8)}\n`;
+    } catch (e) {
+      buildLog += `⚠️ Impossible de récupérer le commit hash\n`;
     }
 
-    // ✅ INSTALLATION COMPLÈTE
-    await execCommand(`cd ${deploymentDir} && npm install --legacy-peer-deps`);
+    // ==================== DÉTECTION DES FRAMEWORKS ====================
+    buildLog += `🔍 Détection des frameworks...\n`;
+    await updateDeploymentLog(deploymentId, buildLog);
+
+    const frameworkHandler = new UniversalFrameworkHandler();
+    const {
+      frameworks: detectedFrameworks,
+      configs: frameworkConfigs,
+      log: detectionLog,
+    } = await frameworkHandler.detectFrameworks(deploymentDir);
+    buildLog += detectionLog;
+
+    let finalBuildCommand = project.build_command || "npm run build";
+    let finalOutputDir = project.output_dir || "dist";
+
+    if (frameworkConfigs.length > 0) {
+      primaryFramework = frameworkConfigs[0];
+      buildLog += `🎯 Framework principal: ${primaryFramework.name}\n`;
+
+      if (!project.build_command) {
+        finalBuildCommand = primaryFramework.config.buildCommand;
+      }
+      if (!project.output_dir) {
+        finalOutputDir = primaryFramework.config.outputDir;
+      }
+    }
+
+    // ==================== MODIFICATION PACKAGE.JSON ====================
+    try {
+      const packageJsonPath = path.join(deploymentDir, "package.json");
+      const packageJson = JSON.parse(
+        await fs.readFile(packageJsonPath, "utf8")
+      );
+
+      const allDeps = {
+        ...packageJson.dependencies,
+        ...packageJson.devDependencies,
+      };
+
+      let modified = false;
+
+      // ✅ FORCER Vite pour React/Vue
+      if (
+        primaryFramework?.name === "react" ||
+        primaryFramework?.name === "vue"
+      ) {
+        if (!packageJson.devDependencies) packageJson.devDependencies = {};
+
+        if (!allDeps.vite) {
+          packageJson.devDependencies.vite = "^5.2.0";
+          modified = true;
+          buildLog += `➕ Vite v5.2.0 ajouté\n`;
+        }
+
+        if (
+          primaryFramework.name === "react" &&
+          !allDeps["@vitejs/plugin-react"]
+        ) {
+          packageJson.devDependencies["@vitejs/plugin-react"] = "^4.3.0";
+          modified = true;
+          buildLog += `➕ @vitejs/plugin-react v4.3.0 ajouté\n`;
+        } else if (
+          primaryFramework.name === "vue" &&
+          !allDeps["@vitejs/plugin-vue"]
+        ) {
+          packageJson.devDependencies["@vitejs/plugin-vue"] = "^5.1.0";
+          modified = true;
+          buildLog += `➕ @vitejs/plugin-vue v5.1.0 ajouté\n`;
+        }
+
+        if (modified) {
+          await fs.writeFile(
+            packageJsonPath,
+            JSON.stringify(packageJson, null, 2)
+          );
+          buildLog += `💾 package.json modifié\n`;
+        }
+      }
+    } catch (error) {
+      buildLog += `⚠️ Erreur modification package.json: ${error.message}\n`;
+    }
+
+    // Setup Tailwind si nécessaire
+    if (detectedFrameworks.includes("tailwind")) {
+      const { buildLog: setupLog } = await frameworkHandler.setupFrameworks(
+        deploymentDir,
+        detectedFrameworks,
+        buildLog
+      );
+      buildLog = setupLog;
+    }
+
+    // ==================== INSTALLATION ====================
+    buildLog += `📦 Installation des dépendances...\n`;
+    await supabase
+      .from("deployments")
+      .update({ status: "building", build_log: buildLog })
+      .eq("id", deploymentId);
+
+    await execCommand(
+      `cd ${deploymentDir} && npm install --legacy-peer-deps`,
+      { NODE_ENV: "production" },
+      300000
+    );
     buildLog += `✅ npm install terminé\n`;
 
     // ✅ VÉRIFICATION VITE
-    try {
-      await fs.access(path.join(deploymentDir, "node_modules/.bin/vite"));
-      buildLog += `✅ Vite installé\n`;
-    } catch {
-      buildLog += `⚠️ Vite manquant, réinstallation...\n`;
-      await execCommand(
-        `cd ${deploymentDir} && npm install vite@latest @vitejs/plugin-react@latest --save-dev --force`
+    if (
+      primaryFramework?.name === "react" ||
+      primaryFramework?.name === "vue"
+    ) {
+      const viteBinPath = path.join(
+        deploymentDir,
+        "node_modules",
+        ".bin",
+        "vite"
       );
+
+      try {
+        await fs.access(viteBinPath);
+        buildLog += `✅ Vite installé: ${viteBinPath}\n`;
+      } catch {
+        buildLog += `⚠️ Vite manquant, installation forcée...\n`;
+        try {
+          await execCommand(
+            `cd ${deploymentDir} && npm install vite@latest @vitejs/plugin-react@latest --save-dev --force`,
+            {},
+            120000
+          );
+          await fs.access(viteBinPath);
+          buildLog += `✅ Vite installé en force\n`;
+        } catch (forceError) {
+          buildLog += `❌ Impossible d'installer Vite: ${forceError.message}\n`;
+          throw new Error("Vite non installé");
+        }
+      }
     }
 
-    // BUILD
-    buildLog += `🏗️ Build...\n`;
-    await execCommand(`cd ${deploymentDir} && npm run build`, {
-      NODE_ENV: "production",
-      CI: "true",
-    });
-    buildLog += `✅ Build réussi\n`;
+    await updateDeploymentLog(deploymentId, buildLog);
 
-    // COPIE FICHIERS
-    const distDir = path.join(deploymentDir, "dist");
-    await execCommand(`cp -r "${distDir}/"* "${outputDir}/"`);
-    buildLog += `✅ Fichiers déployés\n`;
+    // ==================== BUILD ====================
+    buildLog += `🏗️ Build du projet...\n`;
+    buildLog += `🔧 Commande: ${finalBuildCommand}\n`;
+    await updateDeploymentLog(deploymentId, buildLog);
 
-    // SUCCÈS
+    try {
+      const nodeBinPath = path.join(deploymentDir, "node_modules", ".bin");
+
+      await execCommand(
+        `cd ${deploymentDir} && ${finalBuildCommand}`,
+        {
+          NODE_ENV: "production",
+          CI: "true",
+          GENERATE_SOURCEMAP: "false",
+          PATH: `${nodeBinPath}:${process.env.PATH}`,
+        },
+        600000
+      );
+      buildLog += `✅ Build réussi\n`;
+    } catch (buildError) {
+      buildLog += `⚠️ Build échoué: ${buildError.message}\n`;
+      buildLog += `🔄 Tentative avec chemin absolu...\n`;
+
+      try {
+        const viteBin = path.join(
+          deploymentDir,
+          "node_modules",
+          ".bin",
+          "vite"
+        );
+        await fs.access(viteBin);
+
+        await execCommand(
+          `cd ${deploymentDir} && ${viteBin} build`,
+          { NODE_ENV: "production" },
+          600000
+        );
+        buildLog += `✅ Build réussi avec chemin absolu\n`;
+      } catch (fallbackError) {
+        buildLog += `❌ Tous les builds ont échoué: ${fallbackError.message}\n`;
+        throw buildError;
+      }
+    }
+
+    // ==================== COPIE FICHIERS ====================
+    await supabase
+      .from("deployments")
+      .update({ status: "deploying", build_log: buildLog })
+      .eq("id", deploymentId);
+
+    buildLog += `📁 Copie des fichiers...\n`;
+
+    // Chercher le dossier de sortie
+    const possibleDirs = [
+      path.join(deploymentDir, finalOutputDir),
+      path.join(deploymentDir, "dist"),
+      path.join(deploymentDir, "build"),
+      path.join(deploymentDir, "out"),
+    ];
+
+    let sourceDir = null;
+    for (const dir of possibleDirs) {
+      try {
+        await fs.access(dir);
+        const files = await fs.readdir(dir);
+        if (files.includes("index.html")) {
+          sourceDir = dir;
+          buildLog += `✅ Fichiers trouvés dans: ${path.basename(dir)}\n`;
+          break;
+        }
+      } catch {}
+    }
+
+    if (!sourceDir) {
+      throw new Error(`Aucun dossier de sortie trouvé`);
+    }
+
+    await execCommand(`cp -r "${sourceDir}/"* "${outputDir}/"`);
+    buildLog += `✅ Fichiers copiés vers ${outputDir}\n`;
+
+    const copiedFiles = await fs.readdir(outputDir);
+    buildLog += `📊 ${copiedFiles.length} fichiers copiés\n`;
+
+    // ==================== SUCCÈS ====================
+    await supabase
+      .from("deployments")
+      .update({ status: "configuring", build_log: buildLog })
+      .eq("id", deploymentId);
+
     const domain = `${subdomain}.madahost.me`;
     await supabase
       .from("projects")
@@ -406,6 +620,12 @@ async function deployProject(deploymentId, project) {
       })
       .eq("id", project.id);
 
+    buildLog += `✅ [${new Date().toISOString()}] Déploiement réussi!\n`;
+    buildLog += `🌐 Site disponible: https://${domain}\n`;
+    if (primaryFramework) {
+      buildLog += `🎯 Framework: ${primaryFramework.name}\n`;
+    }
+
     await supabase
       .from("deployments")
       .update({
@@ -414,10 +634,14 @@ async function deployProject(deploymentId, project) {
         completed_at: new Date().toISOString(),
       })
       .eq("id", deploymentId);
-
-    buildLog += `✅ Déploiement réussi: https://${domain}\n`;
   } catch (error) {
+    console.error(`❌ Erreur déploiement ${deploymentId}:`, error);
     buildLog += `❌ Erreur: ${error.message}\n`;
+
+    if (primaryFramework) {
+      buildLog += `🔍 Framework: ${primaryFramework.name}\n`;
+    }
+
     await supabase
       .from("deployments")
       .update({
@@ -428,25 +652,39 @@ async function deployProject(deploymentId, project) {
       .eq("id", deploymentId);
   }
 
-  // Nettoyage
+  // Nettoyage après 10 secondes
   setTimeout(
     () => execCommand(`rm -rf ${deploymentDir}`).catch(() => {}),
-    5000
+    10000
   );
 }
 
-function execCommand(command, envVars = {}) {
+async function updateDeploymentLog(deploymentId, buildLog) {
+  try {
+    await supabase
+      .from("deployments")
+      .update({ build_log: buildLog })
+      .eq("id", deploymentId);
+  } catch (error) {
+    console.error("❌ Erreur mise à jour logs:", error);
+  }
+}
+
+function execCommand(command, envVars = {}, timeout = 600000) {
   return new Promise((resolve, reject) => {
     exec(
       command,
       {
-        timeout: 600000,
+        timeout,
         env: { ...process.env, ...envVars },
         maxBuffer: 10 * 1024 * 1024,
       },
       (error, stdout, stderr) => {
-        if (error) reject(new Error(`${error.message}\n${stderr}`));
-        else resolve(stdout);
+        if (error) {
+          reject(new Error(`${error.message}\n${stderr || stdout}`));
+        } else {
+          resolve(stdout);
+        }
       }
     );
   });
