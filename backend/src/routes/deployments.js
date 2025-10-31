@@ -330,21 +330,29 @@ router.delete("/:deploymentId", requireAuth, async (req, res) => {
 async function deployProject(deploymentId, project) {
   let buildLog = "";
   let primaryFramework = null;
-  const deploymentDir = path.join(__dirname, "../../temp", deploymentId);
+
+  // ✅ CORRECTION: Utiliser process.cwd() au lieu de __dirname
+  const deploymentDir = path.join(process.cwd(), "temp", deploymentId);
   const subdomain = project.name.toLowerCase().replace(/[^a-z0-9]/g, "-");
-  const outputDir = path.join("/var/www/deployed", subdomain);
+  const outputDir = path.join("/var/www/deployments", subdomain);
 
   try {
     buildLog += `🚀 [${new Date().toISOString()}] Déploiement de ${
       project.name
     }\n`;
+    buildLog += `📁 Temp dir: ${deploymentDir}\n`;
+    buildLog += `📁 Output dir: ${outputDir}\n`;
     await updateDeploymentLog(deploymentId, buildLog);
 
+    // ✅ Créer les dossiers
     await fs.mkdir(deploymentDir, { recursive: true });
     await fs.mkdir(outputDir, { recursive: true });
+    buildLog += `✅ Dossiers créés\n`;
 
     // ==================== CLONAGE ====================
-    buildLog += `📥 Clonage du repository...\n`;
+    buildLog += `📥 Clonage du repository ${project.github_repo}...\n`;
+    await updateDeploymentLog(deploymentId, buildLog);
+
     const { data: user } = await supabase
       .from("users")
       .select("access_token")
@@ -360,17 +368,41 @@ async function deployProject(deploymentId, project) {
       .update({ status: "cloning", build_log: buildLog })
       .eq("id", deploymentId);
 
-    await execCommand(
-      `git clone --depth 1 -b ${project.branch || "main"} https://${
-        user.access_token
-      }@github.com/${project.github_repo}.git ${deploymentDir}`
-    );
-    buildLog += `✅ Repository cloné\n`;
+    // ✅ CORRECTION: Ajouter gestion d'erreur explicite
+    const cloneCommand = `git clone --depth 1 -b ${
+      project.branch || "main"
+    } https://${user.access_token}@github.com/${
+      project.github_repo
+    }.git "${deploymentDir}"`;
+
+    try {
+      buildLog += `🔧 Commande: git clone -b ${project.branch || "main"}\n`;
+      await execCommand(cloneCommand, {}, 180000); // 3 minutes max
+      buildLog += `✅ Repository cloné avec succès\n`;
+    } catch (cloneError) {
+      buildLog += `❌ Erreur clonage: ${cloneError.message}\n`;
+      throw new Error(
+        `Impossible de cloner le repository: ${cloneError.message}`
+      );
+    }
+
+    // ✅ Vérifier que des fichiers existent
+    try {
+      const files = await fs.readdir(deploymentDir);
+      buildLog += `📊 ${files.length} fichiers/dossiers dans le repo\n`;
+
+      if (files.length === 0) {
+        throw new Error("Le repository cloné est vide");
+      }
+    } catch (readError) {
+      buildLog += `❌ Impossible de lire le dossier cloné: ${readError.message}\n`;
+      throw new Error("Le clonage a échoué ou le dossier est vide");
+    }
 
     // Commit hash
     try {
       const commitHash = await execCommand(
-        `cd ${deploymentDir} && git rev-parse HEAD`
+        `cd "${deploymentDir}" && git rev-parse HEAD`
       );
       await supabase
         .from("deployments")
@@ -380,6 +412,8 @@ async function deployProject(deploymentId, project) {
     } catch (e) {
       buildLog += `⚠️ Impossible de récupérer le commit hash\n`;
     }
+
+    await updateDeploymentLog(deploymentId, buildLog);
 
     // ==================== DÉTECTION DES FRAMEWORKS ====================
     buildLog += `🔍 Détection des frameworks...\n`;
@@ -645,11 +679,7 @@ async function deployProject(deploymentId, project) {
       .eq("id", deploymentId);
   } catch (error) {
     console.error(`❌ Erreur déploiement ${deploymentId}:`, error);
-    buildLog += `❌ Erreur: ${error.message}\n`;
-
-    if (primaryFramework) {
-      buildLog += `🔍 Framework: ${primaryFramework.name}\n`;
-    }
+    buildLog += `❌ [${new Date().toISOString()}] Erreur: ${error.message}\n`;
 
     await supabase
       .from("deployments")
@@ -659,13 +689,15 @@ async function deployProject(deploymentId, project) {
         completed_at: new Date().toISOString(),
       })
       .eq("id", deploymentId);
-  }
 
-  // Nettoyage
-  setTimeout(
-    () => execCommand(`rm -rf ${deploymentDir}`).catch(() => {}),
-    10000
-  );
+    // Nettoyage en cas d'erreur
+    try {
+      await execCommand(`rm -rf "${deploymentDir}"`);
+      buildLog += `🧹 Nettoyage effectué\n`;
+    } catch (cleanupError) {
+      console.error("❌ Erreur nettoyage:", cleanupError);
+    }
+  }
 }
 
 async function updateDeploymentLog(deploymentId, buildLog) {
