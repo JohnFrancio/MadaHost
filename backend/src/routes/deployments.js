@@ -331,7 +331,10 @@ async function deployProject(deploymentId, project) {
   let buildLog = "";
   let primaryFramework = null;
 
-  // ✅ CORRECTION: Chemin ABSOLU explicite au lieu de process.cwd()
+  // ✅ DEBUG: Vérifier le répertoire courant
+  console.log(`🔍 [DEBUG] process.cwd(): ${process.cwd()}`);
+  console.log(`🔍 [DEBUG] __dirname: ${__dirname}`);
+
   const deploymentDir = path.join("/app", "temp", deploymentId);
   const subdomain = project.name.toLowerCase().replace(/[^a-z0-9]/g, "-");
   const outputDir = path.join("/var/www/deployments", subdomain);
@@ -343,10 +346,16 @@ async function deployProject(deploymentId, project) {
     buildLog += `📁 Temp dir: ${deploymentDir}\n`;
     buildLog += `📁 Output dir: ${outputDir}\n`;
 
-    // ✅ AJOUT: Logs de débogage pour vérifier les chemins
-    console.log(`🔍 [DEBUG] Deployment ID: ${deploymentId}`);
-    console.log(`🔍 [DEBUG] Deployment Dir: ${deploymentDir}`);
-    console.log(`🔍 [DEBUG] Output Dir: ${outputDir}`);
+    // ✅ DEBUG: Lister le contenu de /app/temp AVANT création
+    try {
+      const tempFiles = await fs.readdir("/app/temp");
+      console.log(`🔍 [DEBUG] Contenu de /app/temp: ${tempFiles.join(", ")}`);
+      buildLog += `🔍 [DEBUG] Dossiers dans /app/temp: ${tempFiles.join(
+        ", "
+      )}\n`;
+    } catch (e) {
+      console.log(`🔍 [DEBUG] /app/temp n'existe pas encore`);
+    }
 
     await updateDeploymentLog(deploymentId, buildLog);
 
@@ -354,15 +363,35 @@ async function deployProject(deploymentId, project) {
     try {
       const existingFiles = await fs.readdir(deploymentDir);
       buildLog += `⚠️ Dossier existe déjà avec ${existingFiles.length} fichiers, nettoyage...\n`;
+      console.log(
+        `🔍 [DEBUG] Dossier ${deploymentId} existe déjà, nettoyage...`
+      );
       await execCommand(`rm -rf "${deploymentDir}"`);
     } catch (e) {
       // Dossier n'existe pas, c'est bon
+      console.log(
+        `🔍 [DEBUG] Dossier ${deploymentId} n'existe pas, création...`
+      );
     }
 
     // ✅ Créer les dossiers
     await fs.mkdir(deploymentDir, { recursive: true });
     await fs.mkdir(outputDir, { recursive: true });
     buildLog += `✅ Dossiers créés\n`;
+
+    // ✅ DEBUG: Vérifier que le dossier a été créé
+    try {
+      const createdFiles = await fs.readdir(deploymentDir);
+      console.log(
+        `🔍 [DEBUG] Dossier créé avec: ${createdFiles.length} fichiers`
+      );
+      buildLog += `🔍 [DEBUG] Dossier créé avec: ${createdFiles.length} fichiers\n`;
+    } catch (e) {
+      console.log(
+        `❌ [DEBUG] ERREUR: Impossible de lire le dossier créé: ${e.message}`
+      );
+      buildLog += `❌ [DEBUG] ERREUR: Impossible de lire le dossier créé: ${e.message}\n`;
+    }
 
     // ==================== CLONAGE ====================
     buildLog += `📥 Clonage du repository ${project.github_repo}...\n`;
@@ -391,13 +420,56 @@ async function deployProject(deploymentId, project) {
 
     try {
       buildLog += `🔧 Commande: git clone -b ${project.branch || "main"}\n`;
+      console.log(`🔍 [DEBUG] Commande clone: ${cloneCommand}`);
+
       await execCommand(cloneCommand, {}, 180000);
       buildLog += `✅ Repository cloné avec succès\n`;
     } catch (cloneError) {
       buildLog += `❌ Erreur clonage: ${cloneError.message}\n`;
+      console.error(`❌ [DEBUG] Erreur clonage: ${cloneError.message}`);
       throw new Error(
         `Impossible de cloner le repository: ${cloneError.message}`
       );
+    }
+
+    // ✅ DEBUG INTENSIF: Vérifier le contenu APRÈS clonage
+    try {
+      const filesAfterClone = await fs.readdir(deploymentDir);
+      console.log(
+        `🔍 [DEBUG] APRÈS CLONE - ${
+          filesAfterClone.length
+        } fichiers: ${filesAfterClone.join(", ")}`
+      );
+      buildLog += `🔍 [DEBUG] APRÈS CLONE - ${
+        filesAfterClone.length
+      } fichiers: ${filesAfterClone.join(", ")}\n`;
+
+      // Vérifier les fichiers spécifiques
+      const packageJsonPath = path.join(deploymentDir, "package.json");
+      const viteConfigPath = path.join(deploymentDir, "vite.config.js");
+
+      try {
+        await fs.access(packageJsonPath);
+        console.log(`✅ [DEBUG] package.json présent`);
+        buildLog += `✅ [DEBUG] package.json présent\n`;
+      } catch {
+        console.log(`❌ [DEBUG] package.json MANQUANT`);
+        buildLog += `❌ [DEBUG] package.json MANQUANT\n`;
+      }
+
+      try {
+        await fs.access(viteConfigPath);
+        console.log(`✅ [DEBUG] vite.config.js présent`);
+        buildLog += `✅ [DEBUG] vite.config.js présent\n`;
+      } catch {
+        console.log(`❌ [DEBUG] vite.config.js MANQUANT`);
+        buildLog += `❌ [DEBUG] vite.config.js MANQUANT\n`;
+      }
+    } catch (readError) {
+      console.error(
+        `❌ [DEBUG] Impossible de lire après clone: ${readError.message}`
+      );
+      buildLog += `❌ [DEBUG] Impossible de lire après clone: ${readError.message}\n`;
     }
 
     // ✅ VÉRIFICATION RENFORCÉE du contenu cloné
