@@ -627,7 +627,26 @@ async function deployProject(deploymentId, project) {
 
     await updateDeploymentLog(deploymentId, buildLog);
 
-    // ✅ FORCER l'installation COMPLÈTE des dépendances
+    // ✅ DEBUG: Vérifier le package.json AVANT installation
+    try {
+      const packageJsonPath = path.join(deploymentDir, "package.json");
+      const packageJson = JSON.parse(
+        await fs.readFile(packageJsonPath, "utf8")
+      );
+      const allDeps = {
+        ...packageJson.dependencies,
+        ...packageJson.devDependencies,
+      };
+
+      console.log(`🔍 [DEBUG] Vite dans package.json: ${!!allDeps.vite}`);
+      console.log(`🔍 [DEBUG] React dans package.json: ${!!allDeps.react}`);
+      buildLog += `🔍 [DEBUG] Vite dans package.json: ${!!allDeps.vite}\n`;
+      buildLog += `🔍 [DEBUG] React dans package.json: ${!!allDeps.react}\n`;
+    } catch (e) {
+      console.log(`❌ [DEBUG] Erreur lecture package.json: ${e.message}`);
+    }
+
+    // ✅ Installation avec --legacy-peer-deps
     try {
       await execCommand(
         `cd ${deploymentDir} && npm install --legacy-peer-deps`,
@@ -642,48 +661,44 @@ async function deployProject(deploymentId, project) {
       );
     }
 
-    // ✅ FORCER l'installation LOCALE de Vite pour React/Vue
-    if (
-      primaryFramework &&
-      (primaryFramework.name === "react" || primaryFramework.name === "vue")
-    ) {
-      buildLog += `📦 Installation explicite de Vite localement...\n`;
+    // ✅ DEBUG: Vérifier si Vite est installé APRÈS npm install
+    try {
+      const viteCheck = await execCommand(
+        `cd ${deploymentDir} && npm list vite 2>/dev/null || echo "VITE_NOT_INSTALLED"`
+      );
+      console.log(
+        `🔍 [DEBUG] Vite après npm install: ${
+          viteCheck.includes("vite@") ? "INSTALLÉ" : "NON INSTALLÉ"
+        }`
+      );
+      buildLog += `🔍 [DEBUG] Vite après npm install: ${
+        viteCheck.includes("vite@") ? "INSTALLÉ" : "NON INSTALLÉ"
+      }\n`;
 
-      try {
-        // Vérifier si Vite est déjà installé localement
-        const viteCheck = await execCommand(
-          `cd ${deploymentDir} && npm list vite 2>/dev/null || echo "NOT_INSTALLED"`
+      if (viteCheck.includes("VITE_NOT_INSTALLED")) {
+        buildLog += `⚠️ Vite non installé, installation forcée...\n`;
+
+        // FORCER l'installation de Vite
+        await execCommand(
+          `cd ${deploymentDir} && npm install vite@latest --save-dev --legacy-peer-deps`,
+          {},
+          120000
         );
+        buildLog += `✅ Vite installé manuellement\n`;
 
-        if (viteCheck.includes("NOT_INSTALLED")) {
-          buildLog += `🔧 Vite non installé localement, installation...\n`;
+        // Installer le plugin React si nécessaire
+        if (primaryFramework && primaryFramework.name === "react") {
           await execCommand(
-            `cd ${deploymentDir} && npm install vite@latest --save-dev --legacy-peer-deps`,
+            `cd ${deploymentDir} && npm install @vitejs/plugin-react@latest --save-dev --legacy-peer-deps`,
             {},
             120000
           );
-
-          if (primaryFramework.name === "react") {
-            await execCommand(
-              `cd ${deploymentDir} && npm install @vitejs/plugin-react@latest --save-dev --legacy-peer-deps`,
-              {},
-              120000
-            );
-          } else if (primaryFramework.name === "vue") {
-            await execCommand(
-              `cd ${deploymentDir} && npm install @vitejs/plugin-vue@latest --save-dev --legacy-peer-deps`,
-              {},
-              120000
-            );
-          }
-          buildLog += `✅ Vite installé localement avec succès\n`;
-        } else {
-          buildLog += `✅ Vite déjà installé localement\n`;
+          buildLog += `✅ @vitejs/plugin-react installé\n`;
         }
-      } catch (viteError) {
-        buildLog += `⚠️ Erreur installation Vite: ${viteError.message}\n`;
-        // Continuer quand même, peut-être que le build fonctionnera
       }
+    } catch (checkError) {
+      console.log(`❌ [DEBUG] Erreur vérification Vite: ${checkError.message}`);
+      buildLog += `❌ [DEBUG] Erreur vérification Vite: ${checkError.message}\n`;
     }
 
     await updateDeploymentLog(deploymentId, buildLog);
