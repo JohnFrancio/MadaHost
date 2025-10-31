@@ -13,7 +13,7 @@ services:
     env_file:
       - .env.production
     volumes:
-      - /var/www/deployments:/var/www/deployments  # ✅ Important
+      # - /var/www/deployments:/var/www/deployments  # ✅ Important
       - ./backend/logs:/app/logs
       - deployed_projects:/var/www/deployed  # ✅ Volume partagé avec Nginx
       - build_cache:/app/build_cache
