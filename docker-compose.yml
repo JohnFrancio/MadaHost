@@ -13,21 +13,9 @@ services:
     env_file:
       - .env.production
     volumes:
-      - /var/www/deployments:/var/www/deployments  # ✅ Important
+      - /var/www/deployments:/var/www/deployments
       - ./backend/logs:/app/logs
-      - deployed_projects:/var/www/deployed  # ✅ Volume partagé avec Nginx
       - build_cache:/app/build_cache
-    networks:
-      - madahost_network
-
-  frontend:
-    build:
-      context: ./frontend
-      dockerfile: Dockerfile.prod
-      args:
-        - VITE_API_URL=https://api.madahost.me/api
-    restart: always
-    container_name: madahost_frontend
     networks:
       - madahost_network
 
@@ -43,7 +31,7 @@ services:
       - ./nginx/conf.d/madahost.conf:/etc/nginx/conf.d/madahost.conf:ro
       - /etc/letsencrypt:/etc/letsencrypt:ro
       - ./certbot/www:/var/www/certbot:ro
-      - deployed_projects:/var/www/deployed:ro  # ✅ Accès aux projets déployés
+      - /var/www/deployments:/var/www/deployments:ro  # ✅ Changé vers deployments
       - nginx_cache:/var/cache/nginx
     networks:
       - madahost_network
@@ -52,8 +40,6 @@ services:
       - frontend
 
 volumes:
-  deployed_projects:
-    /var/www/deployed 
   build_cache:
     driver: local
   nginx_cache:
