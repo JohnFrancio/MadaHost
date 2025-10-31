@@ -617,9 +617,8 @@ async function deployProject(deploymentId, project) {
       );
       buildLog = setupLog;
     }
-
-    // ==================== INSTALLATION ====================
-    buildLog += `📦 Installation des dépendances...\n`;
+    // ==================== INSTALLATION RADICALE ====================
+    buildLog += `📦 Installation COMPLÈTE des dépendances...\n`;
     await supabase
       .from("deployments")
       .update({ status: "building", build_log: buildLog })
@@ -627,78 +626,69 @@ async function deployProject(deploymentId, project) {
 
     await updateDeploymentLog(deploymentId, buildLog);
 
-    // ✅ DEBUG: Vérifier le package.json AVANT installation
+    // ✅ ÉTAPE 1: Nettoyer le cache npm
+    buildLog += `🧹 Nettoyage du cache npm...\n`;
     try {
-      const packageJsonPath = path.join(deploymentDir, "package.json");
-      const packageJson = JSON.parse(
-        await fs.readFile(packageJsonPath, "utf8")
-      );
-      const allDeps = {
-        ...packageJson.dependencies,
-        ...packageJson.devDependencies,
-      };
-
-      console.log(`🔍 [DEBUG] Vite dans package.json: ${!!allDeps.vite}`);
-      console.log(`🔍 [DEBUG] React dans package.json: ${!!allDeps.react}`);
-      buildLog += `🔍 [DEBUG] Vite dans package.json: ${!!allDeps.vite}\n`;
-      buildLog += `🔍 [DEBUG] React dans package.json: ${!!allDeps.react}\n`;
-    } catch (e) {
-      console.log(`❌ [DEBUG] Erreur lecture package.json: ${e.message}`);
+      await execCommand(`cd ${deploymentDir} && npm cache clean --force`);
+      buildLog += `✅ Cache nettoyé\n`;
+    } catch (cacheError) {
+      buildLog += `⚠️ Nettoyage cache échoué: ${cacheError.message}\n`;
     }
 
-    // ✅ Installation avec --legacy-peer-deps
+    // ✅ ÉTAPE 2: Supprimer node_modules existant
+    buildLog += `🗑️ Suppression node_modules existant...\n`;
     try {
       await execCommand(
-        `cd ${deploymentDir} && npm install --legacy-peer-deps`,
+        `cd ${deploymentDir} && rm -rf node_modules package-lock.json`
+      );
+      buildLog += `✅ node_modules supprimé\n`;
+    } catch (rmError) {
+      buildLog += `⚠️ Suppression node_modules échouée: ${rmError.message}\n`;
+    }
+
+    // ✅ ÉTAPE 3: Installation FORCÉE avec Vite explicite
+    buildLog += `🔧 Installation avec Vite explicite...\n`;
+
+    // Lire le package.json
+    const packageJsonPath = path.join(deploymentDir, "package.json");
+    let packageJson = JSON.parse(await fs.readFile(packageJsonPath, "utf8"));
+
+    // Ajouter Vite explicitement aux devDependencies
+    if (!packageJson.devDependencies) packageJson.devDependencies = {};
+    packageJson.devDependencies.vite = "^5.2.11";
+
+    if (primaryFramework && primaryFramework.name === "react") {
+      packageJson.devDependencies["@vitejs/plugin-react"] = "^4.3.1";
+    } else if (primaryFramework && primaryFramework.name === "vue") {
+      packageJson.devDependencies["@vitejs/plugin-vue"] = "^5.1.2";
+    }
+
+    // Sauvegarder le package.json modifié
+    await fs.writeFile(packageJsonPath, JSON.stringify(packageJson, null, 2));
+    buildLog += `💾 package.json modifié avec Vite\n`;
+
+    // ✅ ÉTAPE 4: Installation complète
+    try {
+      await execCommand(
+        `cd ${deploymentDir} && npm install --legacy-peer-deps --no-audit --no-fund`,
         { NODE_ENV: "production" },
         300000
       );
-      buildLog += `✅ npm install terminé\n`;
+      buildLog += `✅ Installation terminée\n`;
     } catch (installError) {
-      buildLog += `❌ Erreur npm install: ${installError.message}\n`;
-      throw new Error(
-        `Installation des dépendances échouée: ${installError.message}`
-      );
+      buildLog += `❌ Installation échouée: ${installError.message}\n`;
+      throw installError;
     }
 
-    // ✅ DEBUG: Vérifier si Vite est installé APRÈS npm install
+    // ✅ ÉTAPE 5: Vérification finale
     try {
       const viteCheck = await execCommand(
-        `cd ${deploymentDir} && npm list vite 2>/dev/null || echo "VITE_NOT_INSTALLED"`
+        `cd ${deploymentDir} && npm list vite`
       );
-      console.log(
-        `🔍 [DEBUG] Vite après npm install: ${
-          viteCheck.includes("vite@") ? "INSTALLÉ" : "NON INSTALLÉ"
-        }`
-      );
-      buildLog += `🔍 [DEBUG] Vite après npm install: ${
-        viteCheck.includes("vite@") ? "INSTALLÉ" : "NON INSTALLÉ"
-      }\n`;
-
-      if (viteCheck.includes("VITE_NOT_INSTALLED")) {
-        buildLog += `⚠️ Vite non installé, installation forcée...\n`;
-
-        // FORCER l'installation de Vite
-        await execCommand(
-          `cd ${deploymentDir} && npm install vite@latest --save-dev --legacy-peer-deps`,
-          {},
-          120000
-        );
-        buildLog += `✅ Vite installé manuellement\n`;
-
-        // Installer le plugin React si nécessaire
-        if (primaryFramework && primaryFramework.name === "react") {
-          await execCommand(
-            `cd ${deploymentDir} && npm install @vitejs/plugin-react@latest --save-dev --legacy-peer-deps`,
-            {},
-            120000
-          );
-          buildLog += `✅ @vitejs/plugin-react installé\n`;
-        }
-      }
-    } catch (checkError) {
-      console.log(`❌ [DEBUG] Erreur vérification Vite: ${checkError.message}`);
-      buildLog += `❌ [DEBUG] Erreur vérification Vite: ${checkError.message}\n`;
+      buildLog += `✅ Vite vérifié: ${viteCheck.includes("vite@")}\n`;
+    } catch (finalCheckError) {
+      buildLog += `❌ Vite non installé après tout: ${finalCheckError.message}\n`;
+      throw new Error("Vite n'a pas pu être installé");
     }
 
     await updateDeploymentLog(deploymentId, buildLog);
