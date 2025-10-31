@@ -329,7 +329,7 @@ router.delete("/:deploymentId", requireAuth, async (req, res) => {
 
 async function deployProject(deploymentId, project) {
   let buildLog = "";
-  let primaryFramework = null; // ✅ Définir la variable
+  let primaryFramework = null;
   const deploymentDir = path.join(__dirname, "../../temp", deploymentId);
   const subdomain = project.name.toLowerCase().replace(/[^a-z0-9]/g, "-");
   const outputDir = path.join("/var/www/deployed", subdomain);
@@ -397,7 +397,7 @@ async function deployProject(deploymentId, project) {
     let finalOutputDir = project.output_dir || "dist";
 
     if (frameworkConfigs.length > 0) {
-      primaryFramework = frameworkConfigs[0];
+      primaryFramework = frameworkConfigs[0]; // ✅ DÉFINIR ICI
       buildLog += `🎯 Framework principal: ${primaryFramework.name}\n`;
 
       if (!project.build_command) {
@@ -408,12 +408,24 @@ async function deployProject(deploymentId, project) {
       }
     }
 
-    // ==================== MODIFICATION PACKAGE.JSON ====================
+    // ==================== MODIFICATION PACKAGE.JSON (AVANT INSTALLATION!) ====================
+    buildLog += `📋 Modification du package.json...\n`;
+
     try {
       const packageJsonPath = path.join(deploymentDir, "package.json");
-      const packageJson = JSON.parse(
-        await fs.readFile(packageJsonPath, "utf8")
-      );
+      let packageJson;
+
+      try {
+        packageJson = JSON.parse(await fs.readFile(packageJsonPath, "utf8"));
+      } catch (readError) {
+        buildLog += `⚠️ Pas de package.json trouvé, création d'un nouveau\n`;
+        packageJson = {
+          name: project.name,
+          version: "1.0.0",
+          dependencies: {},
+          devDependencies: {},
+        };
+      }
 
       const allDeps = {
         ...packageJson.dependencies,
@@ -421,34 +433,33 @@ async function deployProject(deploymentId, project) {
       };
 
       let modified = false;
+      if (!packageJson.devDependencies) packageJson.devDependencies = {};
 
-      // ✅ FORCER Vite pour React/Vue
+      // ✅ FORCER Vite pour React/Vue (primaryFramework est maintenant défini)
       if (
-        primaryFramework?.name === "react" ||
-        primaryFramework?.name === "vue"
+        primaryFramework &&
+        (primaryFramework.name === "react" || primaryFramework.name === "vue")
       ) {
-        if (!packageJson.devDependencies) packageJson.devDependencies = {};
-
         if (!allDeps.vite) {
-          packageJson.devDependencies.vite = "^5.2.0";
+          packageJson.devDependencies.vite = "^5.2.11";
           modified = true;
-          buildLog += `➕ Vite v5.2.0 ajouté\n`;
+          buildLog += `➕ Vite v5.2.11 ajouté au package.json\n`;
         }
 
         if (
           primaryFramework.name === "react" &&
           !allDeps["@vitejs/plugin-react"]
         ) {
-          packageJson.devDependencies["@vitejs/plugin-react"] = "^4.3.0";
+          packageJson.devDependencies["@vitejs/plugin-react"] = "^4.3.1";
           modified = true;
-          buildLog += `➕ @vitejs/plugin-react v4.3.0 ajouté\n`;
+          buildLog += `➕ @vitejs/plugin-react v4.3.1 ajouté\n`;
         } else if (
           primaryFramework.name === "vue" &&
           !allDeps["@vitejs/plugin-vue"]
         ) {
-          packageJson.devDependencies["@vitejs/plugin-vue"] = "^5.1.0";
+          packageJson.devDependencies["@vitejs/plugin-vue"] = "^5.1.2";
           modified = true;
-          buildLog += `➕ @vitejs/plugin-vue v5.1.0 ajouté\n`;
+          buildLog += `➕ @vitejs/plugin-vue v5.1.2 ajouté\n`;
         }
 
         if (modified) {
@@ -456,12 +467,16 @@ async function deployProject(deploymentId, project) {
             packageJsonPath,
             JSON.stringify(packageJson, null, 2)
           );
-          buildLog += `💾 package.json modifié\n`;
+          buildLog += `💾 package.json modifié et sauvegardé\n`;
+        } else {
+          buildLog += `✅ Vite déjà présent dans package.json\n`;
         }
       }
     } catch (error) {
       buildLog += `⚠️ Erreur modification package.json: ${error.message}\n`;
     }
+
+    await updateDeploymentLog(deploymentId, buildLog);
 
     // Setup Tailwind si nécessaire
     if (detectedFrameworks.includes("tailwind")) {
@@ -480,6 +495,9 @@ async function deployProject(deploymentId, project) {
       .update({ status: "building", build_log: buildLog })
       .eq("id", deploymentId);
 
+    await updateDeploymentLog(deploymentId, buildLog);
+
+    // ✅ Installation avec --legacy-peer-deps pour éviter les conflits
     await execCommand(
       `cd ${deploymentDir} && npm install --legacy-peer-deps`,
       { NODE_ENV: "production" },
@@ -489,8 +507,8 @@ async function deployProject(deploymentId, project) {
 
     // ✅ VÉRIFICATION VITE
     if (
-      primaryFramework?.name === "react" ||
-      primaryFramework?.name === "vue"
+      primaryFramework &&
+      (primaryFramework.name === "react" || primaryFramework.name === "vue")
     ) {
       const viteBinPath = path.join(
         deploymentDir,
@@ -499,23 +517,60 @@ async function deployProject(deploymentId, project) {
         "vite"
       );
 
+      let viteInstalled = false;
+
       try {
         await fs.access(viteBinPath);
+        viteInstalled = true;
         buildLog += `✅ Vite installé: ${viteBinPath}\n`;
       } catch {
-        buildLog += `⚠️ Vite manquant, installation forcée...\n`;
+        buildLog += `⚠️ Vite manquant après npm install\n`;
+      }
+
+      if (!viteInstalled) {
+        buildLog += `🔄 Installation forcée de Vite...\n`;
         try {
+          // Installation avec --force pour écraser les versions
           await execCommand(
-            `cd ${deploymentDir} && npm install vite@latest @vitejs/plugin-react@latest --save-dev --force`,
+            `cd ${deploymentDir} && npm install vite@latest @vitejs/plugin-react@latest --save-dev --force --legacy-peer-deps`,
             {},
             120000
           );
+
+          // Re-vérifier
           await fs.access(viteBinPath);
           buildLog += `✅ Vite installé en force\n`;
+          viteInstalled = true;
         } catch (forceError) {
-          buildLog += `❌ Impossible d'installer Vite: ${forceError.message}\n`;
-          throw new Error("Vite non installé");
+          buildLog += `❌ Installation forcée échouée: ${forceError.message}\n`;
+
+          // Dernière tentative: vérifier si Vite existe dans node_modules (pas dans .bin)
+          try {
+            const viteModulePath = path.join(
+              deploymentDir,
+              "node_modules",
+              "vite"
+            );
+            await fs.access(viteModulePath);
+            buildLog += `✅ Module Vite trouvé dans node_modules, création du lien...\n`;
+
+            // Créer manuellement le lien symbolique
+            const viteBinDir = path.join(deploymentDir, "node_modules", ".bin");
+            await fs.mkdir(viteBinDir, { recursive: true });
+
+            await execCommand(
+              `cd ${deploymentDir} && cd node_modules/.bin && ln -sf ../vite/bin/vite.js vite`
+            );
+            buildLog += `✅ Lien symbolique Vite créé\n`;
+            viteInstalled = true;
+          } catch (linkError) {
+            buildLog += `❌ Impossible de créer le lien Vite: ${linkError.message}\n`;
+          }
         }
+      }
+
+      if (!viteInstalled) {
+        throw new Error("Vite non installé après toutes les tentatives");
       }
     }
 
@@ -652,7 +707,7 @@ async function deployProject(deploymentId, project) {
       .eq("id", deploymentId);
   }
 
-  // Nettoyage après 10 secondes
+  // Nettoyage
   setTimeout(
     () => execCommand(`rm -rf ${deploymentDir}`).catch(() => {}),
     10000
