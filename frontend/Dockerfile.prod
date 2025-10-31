@@ -1,60 +1,35 @@
-# ========================================
-# Stage 1: Dependencies
-# ========================================
-FROM node:20-alpine AS deps
+# Build stage
+FROM node:18-alpine AS builder
 
 WORKDIR /app
 
-# Copier les fichiers de dépendances
+# Copier package.json et package-lock.json
 COPY package*.json ./
 
-# Installer les dépendances de production uniquement
-RUN npm ci --only=production && \
-    npm cache clean --force
-
-# ========================================
-# Stage 2: Production
-# ========================================
-FROM node:18-alpine
-
-# Installer les outils système nécessaires
-RUN apk add --no-cache \
-    git \
-    bash \
-    python3 \
-    make \
-    g++ \
-    wget \
-    curl
-
-WORKDIR /app
-
-# Copier les dépendances depuis le stage deps
-COPY --from=deps /app/node_modules ./node_modules
+# Installer les dépendances
+RUN npm ci
 
 # Copier le code source
 COPY . .
 
-# ✅ INSTALLER VITE ET LES PLUGINS GLOBALEMENT
-# Cela permet aux builds des projets utilisateurs de les utiliser
-RUN npm install -g vite@latest \
-    @vitejs/plugin-react@latest \
-    @vitejs/plugin-vue@latest \
-    && npm cache clean --force
+# Build de production
+RUN npm run build
 
-# Créer les répertoires nécessaires avec permissions
-RUN mkdir -p /app/deployments /app/logs /app/temp /var/www/deployed && \
-    chown -R node:node /app /var/www/deployed
+# Production stage - Nginx léger
+FROM nginx:alpine
 
-# Utilisateur non-root pour la sécurité
-USER node
+# Copier la configuration Nginx personnalisée
+COPY nginx.conf /etc/nginx/conf.d/default.conf
 
-# Exposer le port
-EXPOSE 3001
+# Copier les fichiers buildés depuis le builder
+COPY --from=builder /app/dist /usr/share/nginx/html
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
-    CMD wget --no-verbose --tries=1 --spider http://localhost:3001/health || exit 1
+# Exposer le port 80
+EXPOSE 80
 
-# Démarrage de l'application
-CMD ["node", "src/server.js"]
+# Healthcheck
+HEALTHCHECK --interval=30s --timeout=3s \
+    CMD wget --quiet --tries=1 --spider http://localhost/ || exit 1
+
+# Démarrer Nginx
+CMD ["nginx", "-g", "daemon off;"]
