@@ -393,332 +393,239 @@ async function deployProject(deploymentId, project) {
       buildLog += `❌ [DEBUG] ERREUR: Impossible de lire le dossier créé: ${e.message}\n`;
     }
 
-    // ==================== CLONAGE ====================
-    buildLog += `📥 Clonage du repository ${project.github_repo}...\n`;
-    await updateDeploymentLog(deploymentId, buildLog);
+    // ==================== CLONAGE GIT ====================
+    buildLog += `📥 Clonage du dépôt: ${repoUrl}\n`;
 
-    const { data: user } = await supabase
-      .from("users")
-      .select("access_token")
-      .eq("id", project.user_id)
-      .single();
-
-    if (!user?.access_token) {
-      throw new Error("Token GitHub manquant");
-    }
-
-    await supabase
-      .from("deployments")
-      .update({ status: "cloning", build_log: buildLog })
-      .eq("id", deploymentId);
-
-    const cloneCommand = `git clone --depth 1 -b ${
-      project.branch || "main"
-    } https://${user.access_token}@github.com/${
-      project.github_repo
-    }.git "${deploymentDir}"`;
+    // ✅ FORCER CLONE COMPLET
+    const cloneCommand = `git clone --depth 1 ${repoUrl} ${deploymentDir}`;
+    buildLog += `🔧 Commande: ${cloneCommand}\n`;
 
     try {
-      buildLog += `🔧 Commande: git clone -b ${project.branch || "main"}\n`;
-      console.log(`🔍 [DEBUG] Commande clone: ${cloneCommand}`);
-
-      await execCommand(cloneCommand, {}, 180000);
-      buildLog += `✅ Repository cloné avec succès\n`;
+      const cloneOutput = await execCommand(cloneCommand, {}, 180000);
+      buildLog += `✅ Clonage terminé\n`;
+      buildLog += `📊 Output: ${cloneOutput.substring(0, 500)}\n`;
     } catch (cloneError) {
       buildLog += `❌ Erreur clonage: ${cloneError.message}\n`;
-      console.error(`❌ [DEBUG] Erreur clonage: ${cloneError.message}`);
-      throw new Error(
-        `Impossible de cloner le repository: ${cloneError.message}`
-      );
+      throw cloneError;
     }
 
-    // ✅ DEBUG INTENSIF: Vérifier le contenu APRÈS clonage
+    // ✅ VÉRIFIER QUE LE CLONE A RÉUSSI
     try {
-      const filesAfterClone = await fs.readdir(deploymentDir);
-      console.log(
-        `🔍 [DEBUG] APRÈS CLONE - ${
-          filesAfterClone.length
-        } fichiers: ${filesAfterClone.join(", ")}`
+      const lsOutput = await execCommand(`ls -la ${deploymentDir}`);
+      buildLog += `📂 Contenu du répertoire:\n${lsOutput}\n`;
+
+      const packageCheck = await execCommand(
+        `test -f ${deploymentDir}/package.json && echo "EXISTS" || echo "MISSING"`
       );
-      buildLog += `🔍 [DEBUG] APRÈS CLONE - ${
-        filesAfterClone.length
-      } fichiers: ${filesAfterClone.join(", ")}\n`;
+      buildLog += `📋 package.json: ${packageCheck.trim()}\n`;
 
-      // Vérifier les fichiers spécifiques
-      const packageJsonPath = path.join(deploymentDir, "package.json");
-      const viteConfigPath = path.join(deploymentDir, "vite.config.js");
-
-      try {
-        await fs.access(packageJsonPath);
-        console.log(`✅ [DEBUG] package.json présent`);
-        buildLog += `✅ [DEBUG] package.json présent\n`;
-      } catch {
-        console.log(`❌ [DEBUG] package.json MANQUANT`);
-        buildLog += `❌ [DEBUG] package.json MANQUANT\n`;
+      if (packageCheck.trim() === "MISSING") {
+        throw new Error("package.json introuvable après clonage");
       }
-
-      try {
-        await fs.access(viteConfigPath);
-        console.log(`✅ [DEBUG] vite.config.js présent`);
-        buildLog += `✅ [DEBUG] vite.config.js présent\n`;
-      } catch {
-        console.log(`❌ [DEBUG] vite.config.js MANQUANT`);
-        buildLog += `❌ [DEBUG] vite.config.js MANQUANT\n`;
-      }
-    } catch (readError) {
-      console.error(
-        `❌ [DEBUG] Impossible de lire après clone: ${readError.message}`
-      );
-      buildLog += `❌ [DEBUG] Impossible de lire après clone: ${readError.message}\n`;
-    }
-
-    // ✅ VÉRIFICATION RENFORCÉE du contenu cloné
-    try {
-      const files = await fs.readdir(deploymentDir);
-      buildLog += `📊 ${files.length} fichiers/dossiers dans le repo\n`;
-      buildLog += `📋 Contenu: ${files.join(", ")}\n`; // ✅ AJOUT: Lister les fichiers
-
-      if (files.length === 0) {
-        throw new Error("Le repository cloné est vide");
-      }
-
-      // ✅ VÉRIFICATION: Le dossier contient bien les fichiers du projet
-      const hasPackageJson = files.includes("package.json");
-      const hasSrc =
-        files.includes("src") ||
-        files.includes("app") ||
-        files.includes("pages");
-      buildLog += `📦 package.json présent: ${hasPackageJson}\n`;
-      buildLog += `📁 Dossier src présent: ${hasSrc}\n`;
-    } catch (readError) {
-      buildLog += `❌ Impossible de lire le dossier cloné: ${readError.message}\n`;
-      throw new Error("Le clonage a échoué ou le dossier est vide");
-    }
-
-    // Commit hash
-    try {
-      const commitHash = await execCommand(
-        `cd "${deploymentDir}" && git rev-parse HEAD`
-      );
-      await supabase
-        .from("deployments")
-        .update({ commit_hash: commitHash.trim() })
-        .eq("id", deploymentId);
-      buildLog += `📋 Commit: ${commitHash.trim().substring(0, 8)}\n`;
-    } catch (e) {
-      buildLog += `⚠️ Impossible de récupérer le commit hash\n`;
+    } catch (checkError) {
+      buildLog += `❌ Vérification échouée: ${checkError.message}\n`;
+      throw checkError;
     }
 
     await updateDeploymentLog(deploymentId, buildLog);
 
-    // ==================== DÉTECTION DES FRAMEWORKS ====================
-    buildLog += `🔍 Détection des frameworks...\n`;
-    await updateDeploymentLog(deploymentId, buildLog);
-
-    const frameworkHandler = new UniversalFrameworkHandler();
-    const {
-      frameworks: detectedFrameworks,
-      configs: frameworkConfigs,
-      log: detectionLog,
-    } = await frameworkHandler.detectFrameworks(deploymentDir);
-    buildLog += detectionLog;
-
-    let finalBuildCommand = project.build_command || "npm run build";
-    let finalOutputDir = project.output_dir || "dist";
-
-    if (frameworkConfigs.length > 0) {
-      primaryFramework = frameworkConfigs[0]; // ✅ DÉFINIR ICI
-      buildLog += `🎯 Framework principal: ${primaryFramework.name}\n`;
-
-      if (!project.build_command) {
-        finalBuildCommand = primaryFramework.config.buildCommand;
-      }
-      if (!project.output_dir) {
-        finalOutputDir = primaryFramework.config.outputDir;
-      }
-    }
-
-    // ==================== MODIFICATION PACKAGE.JSON (AVANT INSTALLATION!) ====================
-    buildLog += `📋 Vérification et modification du package.json...\n`;
+    // ==================== FORCER VITE DANS PACKAGE.JSON ====================
+    buildLog += `📋 Modification forcée du package.json...\n`;
 
     try {
       const packageJsonPath = path.join(deploymentDir, "package.json");
-      let packageJson;
+      const packageJson = JSON.parse(
+        await fs.readFile(packageJsonPath, "utf8")
+      );
 
-      try {
-        const content = await fs.readFile(packageJsonPath, "utf8");
-        packageJson = JSON.parse(content);
-        buildLog += `✅ package.json lu avec succès\n`;
-      } catch (readError) {
-        buildLog += `⚠️ Pas de package.json trouvé, création d'un nouveau\n`;
-        packageJson = {
-          name: project.name,
-          version: "1.0.0",
-          dependencies: {},
-          devDependencies: {},
-        };
-      }
+      buildLog += `📦 Package actuel: ${packageJson.name || "inconnu"}\n`;
+
+      // ✅ FORCER devDependencies
+      if (!packageJson.devDependencies) packageJson.devDependencies = {};
 
       const allDeps = {
         ...packageJson.dependencies,
         ...packageJson.devDependencies,
       };
 
-      let modified = false;
-      if (!packageJson.devDependencies) packageJson.devDependencies = {};
+      const isReact = allDeps["react"] || allDeps["react-dom"];
+      const isVue = allDeps["vue"];
 
-      // ✅ DÉTECTER LE FRAMEWORK D'ABORD
-      let isReact = allDeps["react"] || allDeps["react-dom"];
-      let isVue = allDeps["vue"];
+      buildLog += `🔍 Framework: React=${!!isReact}, Vue=${!!isVue}\n`;
 
-      buildLog += `🔍 Framework détecté - React: ${isReact}, Vue: ${isVue}\n`;
+      // ✅ TOUJOURS FORCER VITE + PLUGINS
+      packageJson.devDependencies.vite = "^5.2.11";
 
-      // ✅ FORCER Vite pour React/Vue SI ABSENT
-      if ((isReact || isVue) && !allDeps.vite) {
-        packageJson.devDependencies.vite = "^5.2.11";
-        modified = true;
-        buildLog += `➕ Vite v5.2.11 ajouté au package.json\n`;
-      }
-
-      if (isReact && !allDeps["@vitejs/plugin-react"]) {
+      if (isReact) {
         packageJson.devDependencies["@vitejs/plugin-react"] = "^4.3.1";
-        modified = true;
-        buildLog += `➕ @vitejs/plugin-react v4.3.1 ajouté\n`;
-      }
-
-      if (isVue && !allDeps["@vitejs/plugin-vue"]) {
+        buildLog += `➕ React + Vite forcés\n`;
+      } else if (isVue) {
         packageJson.devDependencies["@vitejs/plugin-vue"] = "^5.1.2";
-        modified = true;
-        buildLog += `➕ @vitejs/plugin-vue v5.1.2 ajouté\n`;
-      }
-
-      if (modified) {
-        await fs.writeFile(
-          packageJsonPath,
-          JSON.stringify(packageJson, null, 2)
-        );
-        buildLog += `💾 package.json modifié et sauvegardé AVANT installation\n`;
+        buildLog += `➕ Vue + Vite forcés\n`;
       } else {
-        buildLog += `✅ Vite déjà présent dans package.json\n`;
+        // Détecter via fichiers
+        try {
+          await execCommand(
+            `test -f ${deploymentDir}/vite.config.js && echo "HAS_VITE"`
+          );
+          packageJson.devDependencies["@vitejs/plugin-react"] = "^4.3.1";
+          buildLog += `➕ Vite.config.js détecté, React plugin ajouté\n`;
+        } catch {}
       }
 
-      // ✅ DEBUG: Vérifier le contenu du package.json
-      const finalPackageJson = JSON.parse(
-        await fs.readFile(packageJsonPath, "utf8")
-      );
-      buildLog += `🔍 [DEBUG] Vite dans package.json: ${!!finalPackageJson
-        .devDependencies?.vite}\n`;
-    } catch (error) {
-      buildLog += `⚠️ Erreur modification package.json: ${error.message}\n`;
+      await fs.writeFile(packageJsonPath, JSON.stringify(packageJson, null, 2));
+      buildLog += `💾 package.json sauvegardé avec Vite\n`;
+    } catch (modifyError) {
+      buildLog += `❌ Modification package.json échouée: ${modifyError.message}\n`;
+      throw modifyError;
     }
 
     await updateDeploymentLog(deploymentId, buildLog);
 
-    // Setup Tailwind si nécessaire
-    if (detectedFrameworks.includes("tailwind")) {
-      const { buildLog: setupLog } = await frameworkHandler.setupFrameworks(
-        deploymentDir,
-        detectedFrameworks,
-        buildLog
+    // ==================== NETTOYAGE RADICAL ====================
+    buildLog += `🗑️ Nettoyage complet...\n`;
+    try {
+      await execCommand(
+        `cd ${deploymentDir} && rm -rf node_modules package-lock.json yarn.lock pnpm-lock.yaml .vite`
       );
-      buildLog = setupLog;
+      buildLog += `✅ Caches supprimés\n`;
+    } catch (cleanError) {
+      buildLog += `⚠️ Nettoyage partiel: ${cleanError.message}\n`;
     }
 
-    // ==================== INSTALLATION (APRÈS MODIFICATION!) ====================
+    await updateDeploymentLog(deploymentId, buildLog);
+
+    // ==================== INSTALLATION AGRESSIVE ====================
     buildLog += `📦 Installation des dépendances...\n`;
+
     await supabase
       .from("deployments")
       .update({ status: "building", build_log: buildLog })
       .eq("id", deploymentId);
 
-    await updateDeploymentLog(deploymentId, buildLog);
-
-    // ✅ Supprimer node_modules et package-lock.json pour forcer réinstallation
-    buildLog += `🗑️ Nettoyage node_modules...\n`;
+    // ✅ MÉTHODE 1: npm install classique
+    buildLog += `🔧 Tentative 1: npm install...\n`;
     try {
-      await execCommand(
-        `cd ${deploymentDir} && rm -rf node_modules package-lock.json`
-      );
-      buildLog += `✅ node_modules supprimé\n`;
-    } catch (rmError) {
-      buildLog += `⚠️ Nettoyage échoué: ${rmError.message}\n`;
-    }
-
-    // ✅ Installation complète
-    buildLog += `🔧 Installation npm...\n`;
-    try {
-      await execCommand(
-        `cd ${deploymentDir} && npm install --legacy-peer-deps --no-audit --no-fund`,
+      const installOutput = await execCommand(
+        `cd ${deploymentDir} && npm install --legacy-peer-deps --no-audit --no-fund --loglevel=verbose`,
         { NODE_ENV: "production" },
         300000
       );
-      buildLog += `✅ Installation terminée\n`;
+      buildLog += `✅ npm install terminé\n`;
+      buildLog += `📊 Dernières lignes:\n${installOutput
+        .split("\n")
+        .slice(-10)
+        .join("\n")}\n`;
     } catch (installError) {
-      buildLog += `❌ Installation échouée: ${installError.message}\n`;
-      throw installError;
-    }
+      buildLog += `❌ npm install échoué: ${installError.message}\n`;
 
-    // ✅ VÉRIFICATION FINALE: Vite est-il installé ?
-    try {
-      const viteCheck = await execCommand(
-        `cd ${deploymentDir} && ls -la node_modules/.bin/vite`
-      );
-      buildLog += `✅ [DEBUG] Vite vérifié dans node_modules/.bin/\n`;
-      buildLog += `🔍 [DEBUG] Vite après npm install: INSTALLÉ\n`;
-    } catch (finalCheckError) {
-      buildLog += `❌ [DEBUG] Vite NON trouvé dans node_modules/.bin/\n`;
-      buildLog += `🔍 [DEBUG] Vite après npm install: NON INSTALLÉ\n`;
-
-      // ✅ FORCER l'installation de Vite explicitement
-      buildLog += `🔄 Installation forcée de Vite...\n`;
+      // ✅ MÉTHODE 2: Installation forcée de Vite
+      buildLog += `🔧 Tentative 2: Installation forcée de Vite...\n`;
       try {
         await execCommand(
-          `cd ${deploymentDir} && npm install --save-dev vite@^5.2.11 @vitejs/plugin-react@^4.3.1`
+          `cd ${deploymentDir} && npm install --save-dev vite@^5.2.11 @vitejs/plugin-react@^4.3.1 --legacy-peer-deps`
         );
         buildLog += `✅ Vite installé en mode forcé\n`;
       } catch (forceError) {
         buildLog += `❌ Installation forcée échouée: ${forceError.message}\n`;
-        throw new Error("Impossible d'installer Vite");
       }
     }
 
     await updateDeploymentLog(deploymentId, buildLog);
 
-    // ==================== BUILD ====================
-    buildLog += `🏗️ Build du projet...\n`;
-    buildLog += `🔧 Commande: ${finalBuildCommand}\n`;
+    // ==================== VÉRIFICATIONS MULTIPLES ====================
+    buildLog += `🔍 Vérifications post-installation...\n`;
+
+    // ✅ CHECK 1: node_modules existe?
+    try {
+      const nmCheck = await execCommand(
+        `test -d ${deploymentDir}/node_modules && echo "EXISTS" || echo "MISSING"`
+      );
+      buildLog += `📁 node_modules: ${nmCheck.trim()}\n`;
+    } catch {}
+
+    // ✅ CHECK 2: Vite binary existe?
+    try {
+      const viteBinCheck = await execCommand(
+        `test -f ${deploymentDir}/node_modules/.bin/vite && echo "EXISTS" || echo "MISSING"`
+      );
+      buildLog += `🔧 vite binary: ${viteBinCheck.trim()}\n`;
+
+      if (viteBinCheck.trim() === "MISSING") {
+        buildLog += `❌ VITE BINARY MANQUANT!\n`;
+
+        // ✅ DERNIÈRE TENTATIVE: npx vite
+        buildLog += `🔧 Tentative finale: npx vite install...\n`;
+        try {
+          await execCommand(
+            `cd ${deploymentDir} && npx vite@^5.2.11 --version`
+          );
+          buildLog += `✅ npx vite fonctionnel\n`;
+        } catch (npxError) {
+          buildLog += `❌ npx vite échoué: ${npxError.message}\n`;
+        }
+      }
+    } catch {}
+
+    // ✅ CHECK 3: package vite existe?
+    try {
+      const viteCheck = await execCommand(
+        `cd ${deploymentDir} && npm list vite`
+      );
+      buildLog += `📦 npm list vite:\n${viteCheck}\n`;
+    } catch (listError) {
+      buildLog += `⚠️ npm list vite échoué: ${listError.message}\n`;
+    }
+
+    // ✅ CHECK 4: Contenu node_modules/.bin/
+    try {
+      const binContents = await execCommand(
+        `ls -la ${deploymentDir}/node_modules/.bin/ | head -20`
+      );
+      buildLog += `📂 Binaires disponibles:\n${binContents}\n`;
+    } catch {}
+
     await updateDeploymentLog(deploymentId, buildLog);
 
-    try {
-      // ✅ Utiliser npx pour exécuter les commandes localement
-      await execCommand(
-        `cd ${deploymentDir} && ${finalBuildCommand}`,
-        {
-          NODE_ENV: "production",
-          CI: "true",
-          GENERATE_SOURCEMAP: "false",
-        },
-        600000
-      );
-      buildLog += `✅ Build réussi\n`;
-    } catch (buildError) {
-      buildLog += `⚠️ Build échoué: ${buildError.message}\n`;
-      buildLog += `🔄 Tentative avec npx...\n`;
+    // ==================== BUILD (avec fallbacks) ====================
+    buildLog += `🔨 Lancement du build...\n`;
 
+    const buildCommands = [
+      "npm run build",
+      "npx vite build",
+      "node_modules/.bin/vite build",
+    ];
+
+    let buildSuccess = false;
+    let buildError = null;
+
+    for (const cmd of buildCommands) {
+      if (buildSuccess) break;
+
+      buildLog += `🔧 Essai: ${cmd}\n`;
       try {
-        // ✅ Utiliser npx pour forcer l'utilisation des binaires locaux
-        await execCommand(
-          `cd ${deploymentDir} && npx ${finalBuildCommand}`,
-          {
-            NODE_ENV: "production",
-          },
-          600000
+        const buildOutput = await execCommand(
+          `cd ${deploymentDir} && ${cmd}`,
+          { NODE_ENV: "production" },
+          300000
         );
-        buildLog += `✅ Build réussi avec npx\n`;
-      } catch (npxError) {
-        buildLog += `❌ Tous les builds ont échoué: ${npxError.message}\n`;
-        throw buildError;
+        buildLog += `✅ Build réussi avec: ${cmd}\n`;
+        buildLog += `📊 Output:\n${buildOutput
+          .split("\n")
+          .slice(-20)
+          .join("\n")}\n`;
+        buildSuccess = true;
+      } catch (error) {
+        buildLog += `❌ Échec ${cmd}: ${error.message}\n`;
+        buildError = error;
       }
+
+      await updateDeploymentLog(deploymentId, buildLog);
+    }
+
+    if (!buildSuccess) {
+      buildLog += `❌ Tous les builds ont échoué\n`;
+      throw buildError;
     }
 
     // ==================== COPIE FICHIERS ====================
