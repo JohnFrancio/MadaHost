@@ -522,7 +522,7 @@ async function deployProject(deploymentId, project) {
 
     await updateDeploymentLog(deploymentId, buildLog);
 
-    // ==================== INSTALLATION AGRESSIVE ====================
+    // ==================== INSTALLATION SIMPLIFIÉE ====================
     buildLog += `📦 Installation des dépendances...\n`;
 
     await supabase
@@ -530,169 +530,78 @@ async function deployProject(deploymentId, project) {
       .update({ status: "building", build_log: buildLog })
       .eq("id", deploymentId);
 
-    // ✅ SOLUTION 1: Installer Vite AVANT npm install
-    buildLog += `🔧 Pré-installation de Vite...\n`;
-    try {
-      await execCommand(
-        `cd ${deploymentDir} && npm install --no-save --legacy-peer-deps vite@^5.2.11 @vitejs/plugin-react@^4.3.1`,
-        { NODE_ENV: "production" },
-        120000
-      );
-      buildLog += `✅ Vite pré-installé\n`;
-    } catch (preInstallError) {
-      buildLog += `⚠️ Pré-installation échouée: ${preInstallError.message}\n`;
-    }
-
-    await updateDeploymentLog(deploymentId, buildLog);
-
-    // ✅ SOLUTION 2: npm install avec --force pour forcer réinstallation
-    buildLog += `🔧 Installation complète des dépendances...\n`;
+    // ✅ Installation SANS modification du package.json
+    buildLog += `🔧 npm install avec package.json original...\n`;
     try {
       const installOutput = await execCommand(
-        `cd ${deploymentDir} && npm install --legacy-peer-deps --force --loglevel=verbose`,
+        `cd ${deploymentDir} && npm install --legacy-peer-deps --loglevel=info`,
         { NODE_ENV: "production" },
         300000
       );
       buildLog += `✅ npm install terminé\n`;
-      buildLog += `📊 Dernières lignes:\n${installOutput
-        .split("\n")
-        .slice(-15)
-        .join("\n")}\n`;
+
+      // Compter les packages installés
+      const packageCount =
+        installOutput.match(/added (\d+) package/)?.[1] || "?";
+      buildLog += `📦 ${packageCount} packages installés\n`;
     } catch (installError) {
       buildLog += `❌ npm install échoué: ${installError.message}\n`;
-
-      // ✅ SOLUTION 3: Réinstaller depuis zéro
-      buildLog += `🔧 Tentative de réinstallation complète...\n`;
-      try {
-        await execCommand(
-          `cd ${deploymentDir} && rm -rf node_modules package-lock.json`
-        );
-        await execCommand(
-          `cd ${deploymentDir} && npm install --legacy-peer-deps --loglevel=verbose`,
-          { NODE_ENV: "production" },
-          300000
-        );
-        buildLog += `✅ Réinstallation réussie\n`;
-      } catch (reinstallError) {
-        buildLog += `❌ Réinstallation échouée: ${reinstallError.message}\n`;
-        throw reinstallError;
-      }
+      // Ne pas throw, on va quand même essayer avec Vite global
     }
 
     await updateDeploymentLog(deploymentId, buildLog);
 
-    // ==================== VÉRIFICATIONS DÉTAILLÉES ====================
-    buildLog += `🔍 Vérifications post-installation...\n`;
+    // ==================== BUILD AVEC VITE GLOBAL ====================
+    buildLog += `🔨 Lancement du build avec Vite global...\n`;
 
-    // ✅ CHECK 1: Lister TOUS les packages installés
-    try {
-      const packageCount = await execCommand(
-        `cd ${deploymentDir} && ls node_modules | wc -l`
-      );
-      buildLog += `📦 Packages installés: ${packageCount.trim()}\n`;
-    } catch {}
-
-    // ✅ CHECK 2: Vérifier spécifiquement Vite
-    try {
-      const viteExists = await execCommand(
-        `cd ${deploymentDir} && ls -la node_modules/vite/package.json`
-      );
-      buildLog += `✅ Package vite trouvé\n`;
-    } catch {
-      buildLog += `❌ Package vite INTROUVABLE\n`;
-    }
-
-    // ✅ CHECK 3: Vérifier le binary
-    try {
-      const viteBinCheck = await execCommand(
-        `test -f ${deploymentDir}/node_modules/.bin/vite && echo "EXISTS" || echo "MISSING"`
-      );
-      buildLog += `🔧 vite binary: ${viteBinCheck.trim()}\n`;
-
-      if (viteBinCheck.trim() === "MISSING") {
-        buildLog += `❌ VITE BINARY MANQUANT - Création manuelle...\n`;
-
-        // ✅ Créer le symlink manuellement si manquant
-        try {
-          await execCommand(
-            `cd ${deploymentDir}/node_modules/.bin && ln -sf ../vite/bin/vite.js vite`
-          );
-          buildLog += `✅ Symlink vite créé manuellement\n`;
-        } catch (linkError) {
-          buildLog += `❌ Création symlink échouée: ${linkError.message}\n`;
-        }
-      }
-    } catch {}
-
-    // ✅ CHECK 4: Test d'exécution Vite
-    try {
-      const viteVersion = await execCommand(
-        `cd ${deploymentDir} && node_modules/.bin/vite --version`
-      );
-      buildLog += `✅ Vite version: ${viteVersion.trim()}\n`;
-    } catch (versionError) {
-      buildLog += `❌ Impossible d'exécuter vite: ${versionError.message}\n`;
-
-      // ✅ SOLUTION ULTIME: Utiliser npx avec téléchargement
-      buildLog += `🔧 Utilisation de npx comme fallback...\n`;
-      try {
-        const npxVersion = await execCommand(
-          `cd ${deploymentDir} && npx --yes vite@^5.2.11 --version`
-        );
-        buildLog += `✅ npx vite fonctionnel: ${npxVersion.trim()}\n`;
-      } catch (npxError) {
-        buildLog += `❌ npx vite échoué: ${npxError.message}\n`;
-      }
-    }
-
-    await updateDeploymentLog(deploymentId, buildLog);
-
-    // ==================== BUILD AVEC MULTIPLES STRATÉGIES ====================
-    buildLog += `🔨 Lancement du build...\n`;
-
+    // ✅ Stratégies de build par ordre de préférence
     const buildStrategies = [
+      {
+        name: "Vite global (installé dans Dockerfile)",
+        cmd: "vite build",
+        description: "Utilise le Vite installé globalement dans le conteneur",
+      },
       {
         name: "npm run build",
         cmd: "npm run build",
+        description: "Commande de build standard du projet",
       },
       {
-        name: "vite direct",
-        cmd: "node_modules/.bin/vite build",
-      },
-      {
-        name: "npx vite",
-        cmd: "npx --yes vite@^5.2.11 build",
-      },
-      {
-        name: "vite global",
-        cmd: "vite build", // Utilise le Vite global du Dockerfile
+        name: "npx vite (téléchargement à la volée)",
+        cmd: "npx --yes vite@latest build",
+        description: "Télécharge et utilise Vite temporairement",
       },
     ];
 
     let buildSuccess = false;
     let buildError = null;
+    let usedStrategy = null;
 
     for (const strategy of buildStrategies) {
       if (buildSuccess) break;
 
-      buildLog += `\n🔧 Stratégie: ${strategy.name}\n`;
-      buildLog += `📋 Commande: ${strategy.cmd}\n`;
+      buildLog += `\n🔧 Tentative: ${strategy.name}\n`;
+      buildLog += `📝 ${strategy.description}\n`;
+      buildLog += `💻 Commande: ${strategy.cmd}\n`;
 
       try {
         const buildOutput = await execCommand(
           `cd ${deploymentDir} && ${strategy.cmd}`,
-          { NODE_ENV: "production" },
+          {
+            NODE_ENV: "production",
+            PATH: `/usr/local/bin:${process.env.PATH}`, // Inclure /usr/local/bin pour Vite global
+          },
           300000
         );
-        buildLog += `✅ Build réussi avec: ${strategy.name}\n`;
-        buildLog += `📊 Output:\n${buildOutput
-          .split("\n")
-          .slice(-25)
-          .join("\n")}\n`;
+
+        buildLog += `✅ BUILD RÉUSSI avec ${strategy.name}\n`;
+        buildLog += `\n📊 Dernières lignes du build:\n`;
+        buildLog += buildOutput.split("\n").slice(-20).join("\n") + "\n";
+
         buildSuccess = true;
+        usedStrategy = strategy.name;
       } catch (error) {
-        buildLog += `❌ Échec ${strategy.name}\n`;
-        buildLog += `📋 Erreur: ${error.message.substring(0, 500)}\n`;
+        buildLog += `❌ Échec: ${error.message.substring(0, 300)}\n`;
         buildError = error;
       }
 
@@ -700,21 +609,53 @@ async function deployProject(deploymentId, project) {
     }
 
     if (!buildSuccess) {
-      buildLog += `\n❌ TOUTES LES STRATÉGIES DE BUILD ONT ÉCHOUÉ\n`;
-      buildLog += `\n📋 Diagnostic:\n`;
+      buildLog += `\n❌ TOUS LES BUILDS ONT ÉCHOUÉ\n`;
+      buildLog += `\n🔍 DIAGNOSTIC:\n`;
 
-      // ✅ Diagnostic final
+      // Diagnostic complet
       try {
-        const diagnostics = await execCommand(
-          `cd ${deploymentDir} && echo "=== NODE VERSION ===" && node --version && echo "\n=== NPM VERSION ===" && npm --version && echo "\n=== VITE CONFIG ===" && cat vite.config.js && echo "\n=== PACKAGE.JSON DEPS ===" && cat package.json | grep -A 20 '"devDependencies"'`
+        buildLog += `\n=== VERSIONS ===\n`;
+        const nodeVersion = await execCommand(`node --version`);
+        buildLog += `Node: ${nodeVersion.trim()}\n`;
+
+        const npmVersion = await execCommand(`npm --version`);
+        buildLog += `npm: ${npmVersion.trim()}\n`;
+
+        try {
+          const viteVersion = await execCommand(`vite --version`);
+          buildLog += `Vite global: ${viteVersion.trim()}\n`;
+        } catch {
+          buildLog += `Vite global: ❌ NON DISPONIBLE\n`;
+        }
+
+        buildLog += `\n=== CONTENU PACKAGE.JSON ===\n`;
+        const pkgContent = await execCommand(
+          `cd ${deploymentDir} && cat package.json`
         );
-        buildLog += diagnostics;
-      } catch {}
+        const pkg = JSON.parse(pkgContent);
+        buildLog += `Nom: ${pkg.name}\n`;
+        buildLog += `Scripts: ${JSON.stringify(pkg.scripts, null, 2)}\n`;
+        buildLog += `Dependencies: ${Object.keys(pkg.dependencies || {}).join(
+          ", "
+        )}\n`;
+        buildLog += `DevDependencies: ${Object.keys(
+          pkg.devDependencies || {}
+        ).join(", ")}\n`;
+
+        buildLog += `\n=== FICHIERS PROJET ===\n`;
+        const files = await execCommand(`cd ${deploymentDir} && ls -la`);
+        buildLog += files;
+      } catch (diagError) {
+        buildLog += `Erreur diagnostic: ${diagError.message}\n`;
+      }
 
       await updateDeploymentLog(deploymentId, buildLog);
-      throw buildError;
+      throw new Error(
+        `Build échoué après ${buildStrategies.length} tentatives`
+      );
     }
 
+    buildLog += `\n✨ Build terminé avec succès via: ${usedStrategy}\n`;
     // ==================== COPIE FICHIERS ====================
     await supabase
       .from("deployments")
