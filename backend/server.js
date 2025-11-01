@@ -301,7 +301,7 @@ const startServer = async () => {
 
   app.use("/api/projects", require("./src/routes/projects"));
   app.use("/api/github", require("./src/routes/github"));
-  app.use("/api/deployments", require("./src/routes/deployments2.js.backup"));
+  app.use("/api/deployments", require("./src/routes/deployments"));
   app.use("/api/admin", require("./src/routes/admin"));
   app.use("/api/messages", require("./src/routes/messages"));
 
