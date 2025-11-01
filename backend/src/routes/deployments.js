@@ -509,11 +509,12 @@ async function deployProject(deploymentId, project) {
 
     await updateDeploymentLog(deploymentId, buildLog);
 
-    // ==================== NETTOYAGE RADICAL ====================
-    buildLog += `🗑️ Nettoyage complet...\n`;
+    // ==================== NETTOYAGE COMPLET ====================
+    buildLog += `🗑️ Nettoyage pour installation fraîche...\n`;
     try {
+      // ✅ SUPPRIMER node_modules ET package-lock.json
       await execCommand(
-        `cd ${deploymentDir} && rm -rf node_modules package-lock.json yarn.lock pnpm-lock.yaml .vite`
+        `cd ${deploymentDir} && rm -rf node_modules package-lock.json`
       );
       buildLog += `✅ Caches supprimés\n`;
     } catch (cleanError) {
@@ -522,16 +523,14 @@ async function deployProject(deploymentId, project) {
 
     await updateDeploymentLog(deploymentId, buildLog);
 
-    // ==================== INSTALLATION SIMPLIFIÉE ====================
-    buildLog += `📦 Installation des dépendances...\n`;
+    // ==================== INSTALLATION COMPLÈTE ====================
+    buildLog += `📦 Installation COMPLÈTE des dépendances...\n`;
 
     await supabase
       .from("deployments")
       .update({ status: "building", build_log: buildLog })
       .eq("id", deploymentId);
 
-    // ✅ Installation SANS modification du package.json
-    buildLog += `🔧 npm install avec package.json original...\n`;
     try {
       const installOutput = await execCommand(
         `cd ${deploymentDir} && npm install --legacy-peer-deps --loglevel=info`,
@@ -541,12 +540,29 @@ async function deployProject(deploymentId, project) {
       buildLog += `✅ npm install terminé\n`;
 
       // Compter les packages installés
-      const packageCount =
-        installOutput.match(/added (\d+) package/)?.[1] || "?";
+      const addedMatch = installOutput.match(/added (\d+) package/);
+      const packageCount = addedMatch ? addedMatch[1] : "?";
       buildLog += `📦 ${packageCount} packages installés\n`;
+
+      // Vérifier que Vite est bien installé
+      try {
+        await execCommand(
+          `cd ${deploymentDir} && ls node_modules/vite/package.json`
+        );
+        buildLog += `✅ Vite installé localement dans node_modules\n`;
+      } catch {
+        buildLog += `⚠️ Vite non trouvé dans node_modules\n`;
+      }
+
+      // Vérifier le binary
+      try {
+        await execCommand(`cd ${deploymentDir} && ls node_modules/.bin/vite`);
+        buildLog += `✅ Binary vite disponible\n`;
+      } catch {
+        buildLog += `⚠️ Binary vite manquant\n`;
+      }
     } catch (installError) {
       buildLog += `❌ npm install échoué: ${installError.message}\n`;
-      // Ne pas throw, on va quand même essayer avec Vite global
     }
 
     await updateDeploymentLog(deploymentId, buildLog);
