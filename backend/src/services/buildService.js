@@ -157,13 +157,23 @@ class BuildService {
       await fs.rm(outputPath, { recursive: true, force: true });
       await fs.mkdir(outputPath, { recursive: true });
 
-      console.log(
-        `🔨 Construction avec: ${project.install_command || "npm install"}`
-      );
+      // ==================== INSTALLATION AVEC DEVDEPENDENCIES ====================
+      // ✅ CRITIQUE: Forcer l'installation des devDependencies (Vite, plugins, etc.)
+      let installCmd = project.install_command || "npm install";
 
-      // Installation des dépendances
-      if (project.install_command && project.install_command.trim()) {
-        await this.executeCommand(project.install_command, buildPath);
+      // Si c'est npm install, forcer --include=dev
+      if (installCmd.includes("npm install") || installCmd === "npm i") {
+        installCmd = "npm install --include=dev --legacy-peer-deps";
+        console.log(
+          `🔧 Installation forcée avec devDependencies: ${installCmd}`
+        );
+      }
+
+      console.log(`📦 Installation: ${installCmd}`);
+
+      if (installCmd && installCmd.trim()) {
+        // ✅ Vider NODE_ENV pour que npm installe les devDependencies
+        await this.executeCommand(installCmd, buildPath, { NODE_ENV: "" });
       }
 
       // Build du projet
