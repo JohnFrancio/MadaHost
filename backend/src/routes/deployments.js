@@ -539,14 +539,16 @@ async function deployProject(deploymentId, project) {
     }
 
     // ==================== MODIFICATION PACKAGE.JSON (AVANT INSTALLATION!) ====================
-    buildLog += `📋 Modification du package.json...\n`;
+    buildLog += `📋 Vérification et modification du package.json...\n`;
 
     try {
       const packageJsonPath = path.join(deploymentDir, "package.json");
       let packageJson;
 
       try {
-        packageJson = JSON.parse(await fs.readFile(packageJsonPath, "utf8"));
+        const content = await fs.readFile(packageJsonPath, "utf8");
+        packageJson = JSON.parse(content);
+        buildLog += `✅ package.json lu avec succès\n`;
       } catch (readError) {
         buildLog += `⚠️ Pas de package.json trouvé, création d'un nouveau\n`;
         packageJson = {
@@ -565,43 +567,47 @@ async function deployProject(deploymentId, project) {
       let modified = false;
       if (!packageJson.devDependencies) packageJson.devDependencies = {};
 
-      // ✅ FORCER Vite pour React/Vue (primaryFramework est maintenant défini)
-      if (
-        primaryFramework &&
-        (primaryFramework.name === "react" || primaryFramework.name === "vue")
-      ) {
-        if (!allDeps.vite) {
-          packageJson.devDependencies.vite = "^5.2.11";
-          modified = true;
-          buildLog += `➕ Vite v5.2.11 ajouté au package.json\n`;
-        }
+      // ✅ DÉTECTER LE FRAMEWORK D'ABORD
+      let isReact = allDeps["react"] || allDeps["react-dom"];
+      let isVue = allDeps["vue"];
 
-        if (
-          primaryFramework.name === "react" &&
-          !allDeps["@vitejs/plugin-react"]
-        ) {
-          packageJson.devDependencies["@vitejs/plugin-react"] = "^4.3.1";
-          modified = true;
-          buildLog += `➕ @vitejs/plugin-react v4.3.1 ajouté\n`;
-        } else if (
-          primaryFramework.name === "vue" &&
-          !allDeps["@vitejs/plugin-vue"]
-        ) {
-          packageJson.devDependencies["@vitejs/plugin-vue"] = "^5.1.2";
-          modified = true;
-          buildLog += `➕ @vitejs/plugin-vue v5.1.2 ajouté\n`;
-        }
+      buildLog += `🔍 Framework détecté - React: ${isReact}, Vue: ${isVue}\n`;
 
-        if (modified) {
-          await fs.writeFile(
-            packageJsonPath,
-            JSON.stringify(packageJson, null, 2)
-          );
-          buildLog += `💾 package.json modifié et sauvegardé\n`;
-        } else {
-          buildLog += `✅ Vite déjà présent dans package.json\n`;
-        }
+      // ✅ FORCER Vite pour React/Vue SI ABSENT
+      if ((isReact || isVue) && !allDeps.vite) {
+        packageJson.devDependencies.vite = "^5.2.11";
+        modified = true;
+        buildLog += `➕ Vite v5.2.11 ajouté au package.json\n`;
       }
+
+      if (isReact && !allDeps["@vitejs/plugin-react"]) {
+        packageJson.devDependencies["@vitejs/plugin-react"] = "^4.3.1";
+        modified = true;
+        buildLog += `➕ @vitejs/plugin-react v4.3.1 ajouté\n`;
+      }
+
+      if (isVue && !allDeps["@vitejs/plugin-vue"]) {
+        packageJson.devDependencies["@vitejs/plugin-vue"] = "^5.1.2";
+        modified = true;
+        buildLog += `➕ @vitejs/plugin-vue v5.1.2 ajouté\n`;
+      }
+
+      if (modified) {
+        await fs.writeFile(
+          packageJsonPath,
+          JSON.stringify(packageJson, null, 2)
+        );
+        buildLog += `💾 package.json modifié et sauvegardé AVANT installation\n`;
+      } else {
+        buildLog += `✅ Vite déjà présent dans package.json\n`;
+      }
+
+      // ✅ DEBUG: Vérifier le contenu du package.json
+      const finalPackageJson = JSON.parse(
+        await fs.readFile(packageJsonPath, "utf8")
+      );
+      buildLog += `🔍 [DEBUG] Vite dans package.json: ${!!finalPackageJson
+        .devDependencies?.vite}\n`;
     } catch (error) {
       buildLog += `⚠️ Erreur modification package.json: ${error.message}\n`;
     }
@@ -617,8 +623,9 @@ async function deployProject(deploymentId, project) {
       );
       buildLog = setupLog;
     }
-    // ==================== INSTALLATION RADICALE ====================
-    buildLog += `📦 Installation COMPLÈTE des dépendances...\n`;
+
+    // ==================== INSTALLATION (APRÈS MODIFICATION!) ====================
+    buildLog += `📦 Installation des dépendances...\n`;
     await supabase
       .from("deployments")
       .update({ status: "building", build_log: buildLog })
@@ -626,48 +633,19 @@ async function deployProject(deploymentId, project) {
 
     await updateDeploymentLog(deploymentId, buildLog);
 
-    // ✅ ÉTAPE 1: Nettoyer le cache npm
-    buildLog += `🧹 Nettoyage du cache npm...\n`;
-    try {
-      await execCommand(`cd ${deploymentDir} && npm cache clean --force`);
-      buildLog += `✅ Cache nettoyé\n`;
-    } catch (cacheError) {
-      buildLog += `⚠️ Nettoyage cache échoué: ${cacheError.message}\n`;
-    }
-
-    // ✅ ÉTAPE 2: Supprimer node_modules existant
-    buildLog += `🗑️ Suppression node_modules existant...\n`;
+    // ✅ Supprimer node_modules et package-lock.json pour forcer réinstallation
+    buildLog += `🗑️ Nettoyage node_modules...\n`;
     try {
       await execCommand(
         `cd ${deploymentDir} && rm -rf node_modules package-lock.json`
       );
       buildLog += `✅ node_modules supprimé\n`;
     } catch (rmError) {
-      buildLog += `⚠️ Suppression node_modules échouée: ${rmError.message}\n`;
+      buildLog += `⚠️ Nettoyage échoué: ${rmError.message}\n`;
     }
 
-    // ✅ ÉTAPE 3: Installation FORCÉE avec Vite explicite
-    buildLog += `🔧 Installation avec Vite explicite...\n`;
-
-    // Lire le package.json
-    const packageJsonPath = path.join(deploymentDir, "package.json");
-    let packageJson = JSON.parse(await fs.readFile(packageJsonPath, "utf8"));
-
-    // Ajouter Vite explicitement aux devDependencies
-    if (!packageJson.devDependencies) packageJson.devDependencies = {};
-    packageJson.devDependencies.vite = "^5.2.11";
-
-    if (primaryFramework && primaryFramework.name === "react") {
-      packageJson.devDependencies["@vitejs/plugin-react"] = "^4.3.1";
-    } else if (primaryFramework && primaryFramework.name === "vue") {
-      packageJson.devDependencies["@vitejs/plugin-vue"] = "^5.1.2";
-    }
-
-    // Sauvegarder le package.json modifié
-    await fs.writeFile(packageJsonPath, JSON.stringify(packageJson, null, 2));
-    buildLog += `💾 package.json modifié avec Vite\n`;
-
-    // ✅ ÉTAPE 4: Installation complète
+    // ✅ Installation complète
+    buildLog += `🔧 Installation npm...\n`;
     try {
       await execCommand(
         `cd ${deploymentDir} && npm install --legacy-peer-deps --no-audit --no-fund`,
@@ -680,15 +658,28 @@ async function deployProject(deploymentId, project) {
       throw installError;
     }
 
-    // ✅ ÉTAPE 5: Vérification finale
+    // ✅ VÉRIFICATION FINALE: Vite est-il installé ?
     try {
       const viteCheck = await execCommand(
-        `cd ${deploymentDir} && npm list vite`
+        `cd ${deploymentDir} && ls -la node_modules/.bin/vite`
       );
-      buildLog += `✅ Vite vérifié: ${viteCheck.includes("vite@")}\n`;
+      buildLog += `✅ [DEBUG] Vite vérifié dans node_modules/.bin/\n`;
+      buildLog += `🔍 [DEBUG] Vite après npm install: INSTALLÉ\n`;
     } catch (finalCheckError) {
-      buildLog += `❌ Vite non installé après tout: ${finalCheckError.message}\n`;
-      throw new Error("Vite n'a pas pu être installé");
+      buildLog += `❌ [DEBUG] Vite NON trouvé dans node_modules/.bin/\n`;
+      buildLog += `🔍 [DEBUG] Vite après npm install: NON INSTALLÉ\n`;
+
+      // ✅ FORCER l'installation de Vite explicitement
+      buildLog += `🔄 Installation forcée de Vite...\n`;
+      try {
+        await execCommand(
+          `cd ${deploymentDir} && npm install --save-dev vite@^5.2.11 @vitejs/plugin-react@^4.3.1`
+        );
+        buildLog += `✅ Vite installé en mode forcé\n`;
+      } catch (forceError) {
+        buildLog += `❌ Installation forcée échouée: ${forceError.message}\n`;
+        throw new Error("Impossible d'installer Vite");
+      }
     }
 
     await updateDeploymentLog(deploymentId, buildLog);

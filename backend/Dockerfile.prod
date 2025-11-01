@@ -9,7 +9,7 @@ FROM node:20-alpine
 
 # Installer les dépendances système + Vite global
 RUN apk add --no-cache git python3 make g++ && \
-    npm install -g vite@latest
+    npm install -g vite@^5.2.11 @vitejs/plugin-react@^4.3.1
 
 WORKDIR /app
 
