@@ -456,8 +456,19 @@ async function deployProject(deploymentId, project) {
 
     await updateDeploymentLog(deploymentId, buildLog);
 
+    // ==================== SUPPRESSION LOCK FILE (CRITIQUE!) ====================
+    buildLog += `🗑️ Suppression du package-lock.json pour forcer installation fraîche...\n`;
+    try {
+      await execCommand(`cd ${deploymentDir} && rm -f package-lock.json`);
+      buildLog += `✅ package-lock.json supprimé\n`;
+    } catch (rmError) {
+      buildLog += `⚠️ Suppression lock échouée: ${rmError.message}\n`;
+    }
+
+    await updateDeploymentLog(deploymentId, buildLog);
+
     // ==================== FORCER VITE DANS PACKAGE.JSON ====================
-    buildLog += `📋 Modification forcée du package.json...\n`;
+    buildLog += `📋 Modification du package.json...\n`;
 
     try {
       const packageJsonPath = path.join(deploymentDir, "package.json");
@@ -465,7 +476,7 @@ async function deployProject(deploymentId, project) {
         await fs.readFile(packageJsonPath, "utf8")
       );
 
-      buildLog += `📦 Package actuel: ${packageJson.name || "inconnu"}\n`;
+      buildLog += `📦 Package: ${packageJson.name || "inconnu"}\n`;
 
       // ✅ FORCER devDependencies
       if (!packageJson.devDependencies) packageJson.devDependencies = {};
@@ -480,15 +491,15 @@ async function deployProject(deploymentId, project) {
 
       buildLog += `🔍 Framework: React=${!!isReact}, Vue=${!!isVue}\n`;
 
-      // ✅ TOUJOURS FORCER VITE + PLUGINS
-      packageJson.devDependencies.vite = "^5.2.11";
+      // ✅ TOUJOURS FORCER VITE + PLUGINS (même s'ils existent déjà)
+      packageJson.devDependencies.vite = "^5.4.11"; // Version plus récente
 
       if (isReact) {
         packageJson.devDependencies["@vitejs/plugin-react"] = "^4.3.1";
-        buildLog += `➕ React + Vite forcés\n`;
+        buildLog += `➕ React + Vite ajoutés/mis à jour\n`;
       } else if (isVue) {
         packageJson.devDependencies["@vitejs/plugin-vue"] = "^5.1.2";
-        buildLog += `➕ Vue + Vite forcés\n`;
+        buildLog += `➕ Vue + Vite ajoutés/mis à jour\n`;
       } else {
         // Détecter via fichiers
         try {
@@ -501,7 +512,7 @@ async function deployProject(deploymentId, project) {
       }
 
       await fs.writeFile(packageJsonPath, JSON.stringify(packageJson, null, 2));
-      buildLog += `💾 package.json sauvegardé avec Vite\n`;
+      buildLog += `💾 package.json sauvegardé\n`;
     } catch (modifyError) {
       buildLog += `❌ Modification package.json échouée: ${modifyError.message}\n`;
       throw modifyError;
@@ -509,22 +520,8 @@ async function deployProject(deploymentId, project) {
 
     await updateDeploymentLog(deploymentId, buildLog);
 
-    // ==================== NETTOYAGE COMPLET ====================
-    buildLog += `🗑️ Nettoyage pour installation fraîche...\n`;
-    try {
-      // ✅ SUPPRIMER node_modules ET package-lock.json
-      await execCommand(
-        `cd ${deploymentDir} && rm -rf node_modules package-lock.json`
-      );
-      buildLog += `✅ Caches supprimés\n`;
-    } catch (cleanError) {
-      buildLog += `⚠️ Nettoyage partiel: ${cleanError.message}\n`;
-    }
-
-    await updateDeploymentLog(deploymentId, buildLog);
-
     // ==================== INSTALLATION COMPLÈTE ====================
-    buildLog += `📦 Installation COMPLÈTE des dépendances...\n`;
+    buildLog += `📦 Installation des dépendances (sans cache)...\n`;
 
     await supabase
       .from("deployments")
@@ -533,7 +530,7 @@ async function deployProject(deploymentId, project) {
 
     try {
       const installOutput = await execCommand(
-        `cd ${deploymentDir} && npm install --legacy-peer-deps --loglevel=info`,
+        `cd ${deploymentDir} && npm install --legacy-peer-deps --no-fund --no-audit`,
         { NODE_ENV: "production" },
         300000
       );
@@ -544,25 +541,28 @@ async function deployProject(deploymentId, project) {
       const packageCount = addedMatch ? addedMatch[1] : "?";
       buildLog += `📦 ${packageCount} packages installés\n`;
 
-      // Vérifier que Vite est bien installé
+      // ✅ VÉRIFICATIONS CRITIQUES
       try {
         await execCommand(
-          `cd ${deploymentDir} && ls node_modules/vite/package.json`
+          `cd ${deploymentDir} && test -f node_modules/vite/package.json`
         );
-        buildLog += `✅ Vite installé localement dans node_modules\n`;
+        buildLog += `✅ Package vite installé\n`;
       } catch {
-        buildLog += `⚠️ Vite non trouvé dans node_modules\n`;
+        buildLog += `❌ Package vite MANQUANT - npm install a échoué\n`;
+        throw new Error("Vite non installé après npm install");
       }
 
-      // Vérifier le binary
       try {
-        await execCommand(`cd ${deploymentDir} && ls node_modules/.bin/vite`);
+        await execCommand(
+          `cd ${deploymentDir} && test -f node_modules/.bin/vite`
+        );
         buildLog += `✅ Binary vite disponible\n`;
       } catch {
-        buildLog += `⚠️ Binary vite manquant\n`;
+        buildLog += `⚠️ Binary vite manquant (sera créé par npm)\n`;
       }
     } catch (installError) {
       buildLog += `❌ npm install échoué: ${installError.message}\n`;
+      throw installError; // Arrêter ici si l'installation échoue
     }
 
     await updateDeploymentLog(deploymentId, buildLog);
