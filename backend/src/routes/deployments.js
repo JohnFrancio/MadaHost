@@ -521,48 +521,47 @@ async function deployProject(deploymentId, project) {
     await updateDeploymentLog(deploymentId, buildLog);
 
     // ==================== INSTALLATION COMPLÈTE ====================
-    buildLog += `📦 Installation des dépendances (sans cache)...\n`;
+    buildLog += `📦 Installation des dépendances...\n`;
 
     await supabase
       .from("deployments")
       .update({ status: "building", build_log: buildLog })
       .eq("id", deploymentId);
 
+    // ✅ SUPPRIMER le package-lock.json pour forcer une installation fraîche
+    buildLog += `🗑️ Suppression du package-lock.json pour installation fraîche...\n`;
+    try {
+      await execCommand(`cd ${deploymentDir} && rm -f package-lock.json`);
+      buildLog += `✅ package-lock.json supprimé\n`;
+    } catch {}
+
+    // ✅ Installation COMPLÈTE avec package.json MODIFIÉ
+    buildLog += `🔧 npm install complet...\n`;
     try {
       const installOutput = await execCommand(
-        `cd ${deploymentDir} && npm install --legacy-peer-deps --no-fund --no-audit`,
+        `cd ${deploymentDir} && npm install --legacy-peer-deps --loglevel=info`,
         { NODE_ENV: "production" },
         300000
       );
       buildLog += `✅ npm install terminé\n`;
 
       // Compter les packages installés
-      const addedMatch = installOutput.match(/added (\d+) package/);
-      const packageCount = addedMatch ? addedMatch[1] : "?";
+      const packageCount =
+        installOutput.match(/added (\d+) package/)?.[1] || "?";
       buildLog += `📦 ${packageCount} packages installés\n`;
 
-      // ✅ VÉRIFICATIONS CRITIQUES
+      // Vérifier que Vite est bien installé
       try {
-        await execCommand(
-          `cd ${deploymentDir} && test -f node_modules/vite/package.json`
+        const viteCheck = await execCommand(
+          `cd ${deploymentDir} && ls node_modules/vite/package.json`
         );
-        buildLog += `✅ Package vite installé\n`;
+        buildLog += `✅ Vite installé localement\n`;
       } catch {
-        buildLog += `❌ Package vite MANQUANT - npm install a échoué\n`;
-        throw new Error("Vite non installé après npm install");
-      }
-
-      try {
-        await execCommand(
-          `cd ${deploymentDir} && test -f node_modules/.bin/vite`
-        );
-        buildLog += `✅ Binary vite disponible\n`;
-      } catch {
-        buildLog += `⚠️ Binary vite manquant (sera créé par npm)\n`;
+        buildLog += `⚠️ Vite non trouvé dans node_modules\n`;
       }
     } catch (installError) {
       buildLog += `❌ npm install échoué: ${installError.message}\n`;
-      throw installError; // Arrêter ici si l'installation échoue
+      // Ne pas throw, on va quand même essayer avec Vite global
     }
 
     await updateDeploymentLog(deploymentId, buildLog);
