@@ -105,32 +105,26 @@ class BuildService {
   /**
    * Cloner le repository GitHub
    */
+  // Dans buildService.js, méthode cloneRepository (ligne ~86)
   async cloneRepository(project, deploymentId) {
     const buildPath = path.join(this.tempDir, `build-${deploymentId}`);
 
     try {
-      console.log(`📂 Création dossier: ${buildPath}`);
-
-      // Vérifier que le dossier temp existe
       await fs.mkdir(this.tempDir, { recursive: true });
 
-      // Récupérer le token GitHub de l'utilisateur
-      const { data: user } = await supabase
-        .from("users")
-        .select("access_token")
-        .eq("id", project.user_id)
-        .single();
+      // ✅ CORRECTION: Utiliser GITHUB_TOKEN depuis .env au lieu de la BDD
+      const githubToken = process.env.GITHUB_TOKEN;
+      const repoUrl = githubToken
+        ? `https://${githubToken}@github.com/${project.github_repo}.git`
+        : `https://github.com/${project.github_repo}.git`;
 
-      if (!user?.access_token) {
-        throw new Error("Token GitHub manquant");
-      }
+      const cloneCmd = `git clone --depth 1 -b ${
+        project.branch || "main"
+      } "${repoUrl}" "${buildPath}"`;
 
-      const repoUrl = `https://${user.access_token}@github.com/${project.github_repo}.git`;
-
-      // Cloner le repository
-      const cloneCmd = `git clone --depth 1 -b ${project.branch} "${repoUrl}" "${buildPath}"`;
-
-      console.log(`📂 Clonage: ${project.github_repo}@${project.branch}`);
+      console.log(
+        `📂 Clonage: ${project.github_repo}@${project.branch || "main"}`
+      );
       execSync(cloneCmd, { stdio: "pipe" });
 
       // Récupérer le hash du commit
@@ -139,7 +133,6 @@ class BuildService {
         encoding: "utf8",
       }).trim();
 
-      // Sauvegarder le commit hash
       await supabase
         .from("deployments")
         .update({ commit_hash: commitHash })
