@@ -530,48 +530,79 @@ async function deployProject(deploymentId, project) {
       .update({ status: "building", build_log: buildLog })
       .eq("id", deploymentId);
 
-    // ✅ MÉTHODE 1: npm install classique
-    buildLog += `🔧 Tentative 1: npm install...\n`;
+    // ✅ SOLUTION 1: Installer Vite AVANT npm install
+    buildLog += `🔧 Pré-installation de Vite...\n`;
+    try {
+      await execCommand(
+        `cd ${deploymentDir} && npm install --no-save --legacy-peer-deps vite@^5.2.11 @vitejs/plugin-react@^4.3.1`,
+        { NODE_ENV: "production" },
+        120000
+      );
+      buildLog += `✅ Vite pré-installé\n`;
+    } catch (preInstallError) {
+      buildLog += `⚠️ Pré-installation échouée: ${preInstallError.message}\n`;
+    }
+
+    await updateDeploymentLog(deploymentId, buildLog);
+
+    // ✅ SOLUTION 2: npm install avec --force pour forcer réinstallation
+    buildLog += `🔧 Installation complète des dépendances...\n`;
     try {
       const installOutput = await execCommand(
-        `cd ${deploymentDir} && npm install --legacy-peer-deps --no-audit --no-fund --loglevel=verbose`,
+        `cd ${deploymentDir} && npm install --legacy-peer-deps --force --loglevel=verbose`,
         { NODE_ENV: "production" },
         300000
       );
       buildLog += `✅ npm install terminé\n`;
       buildLog += `📊 Dernières lignes:\n${installOutput
         .split("\n")
-        .slice(-10)
+        .slice(-15)
         .join("\n")}\n`;
     } catch (installError) {
       buildLog += `❌ npm install échoué: ${installError.message}\n`;
 
-      // ✅ MÉTHODE 2: Installation forcée de Vite
-      buildLog += `🔧 Tentative 2: Installation forcée de Vite...\n`;
+      // ✅ SOLUTION 3: Réinstaller depuis zéro
+      buildLog += `🔧 Tentative de réinstallation complète...\n`;
       try {
         await execCommand(
-          `cd ${deploymentDir} && npm install --save-dev vite@^5.2.11 @vitejs/plugin-react@^4.3.1 --legacy-peer-deps`
+          `cd ${deploymentDir} && rm -rf node_modules package-lock.json`
         );
-        buildLog += `✅ Vite installé en mode forcé\n`;
-      } catch (forceError) {
-        buildLog += `❌ Installation forcée échouée: ${forceError.message}\n`;
+        await execCommand(
+          `cd ${deploymentDir} && npm install --legacy-peer-deps --loglevel=verbose`,
+          { NODE_ENV: "production" },
+          300000
+        );
+        buildLog += `✅ Réinstallation réussie\n`;
+      } catch (reinstallError) {
+        buildLog += `❌ Réinstallation échouée: ${reinstallError.message}\n`;
+        throw reinstallError;
       }
     }
 
     await updateDeploymentLog(deploymentId, buildLog);
 
-    // ==================== VÉRIFICATIONS MULTIPLES ====================
+    // ==================== VÉRIFICATIONS DÉTAILLÉES ====================
     buildLog += `🔍 Vérifications post-installation...\n`;
 
-    // ✅ CHECK 1: node_modules existe?
+    // ✅ CHECK 1: Lister TOUS les packages installés
     try {
-      const nmCheck = await execCommand(
-        `test -d ${deploymentDir}/node_modules && echo "EXISTS" || echo "MISSING"`
+      const packageCount = await execCommand(
+        `cd ${deploymentDir} && ls node_modules | wc -l`
       );
-      buildLog += `📁 node_modules: ${nmCheck.trim()}\n`;
+      buildLog += `📦 Packages installés: ${packageCount.trim()}\n`;
     } catch {}
 
-    // ✅ CHECK 2: Vite binary existe?
+    // ✅ CHECK 2: Vérifier spécifiquement Vite
+    try {
+      const viteExists = await execCommand(
+        `cd ${deploymentDir} && ls -la node_modules/vite/package.json`
+      );
+      buildLog += `✅ Package vite trouvé\n`;
+    } catch {
+      buildLog += `❌ Package vite INTROUVABLE\n`;
+    }
+
+    // ✅ CHECK 3: Vérifier le binary
     try {
       const viteBinCheck = await execCommand(
         `test -f ${deploymentDir}/node_modules/.bin/vite && echo "EXISTS" || echo "MISSING"`
@@ -579,71 +610,89 @@ async function deployProject(deploymentId, project) {
       buildLog += `🔧 vite binary: ${viteBinCheck.trim()}\n`;
 
       if (viteBinCheck.trim() === "MISSING") {
-        buildLog += `❌ VITE BINARY MANQUANT!\n`;
+        buildLog += `❌ VITE BINARY MANQUANT - Création manuelle...\n`;
 
-        // ✅ DERNIÈRE TENTATIVE: npx vite
-        buildLog += `🔧 Tentative finale: npx vite install...\n`;
+        // ✅ Créer le symlink manuellement si manquant
         try {
           await execCommand(
-            `cd ${deploymentDir} && npx vite@^5.2.11 --version`
+            `cd ${deploymentDir}/node_modules/.bin && ln -sf ../vite/bin/vite.js vite`
           );
-          buildLog += `✅ npx vite fonctionnel\n`;
-        } catch (npxError) {
-          buildLog += `❌ npx vite échoué: ${npxError.message}\n`;
+          buildLog += `✅ Symlink vite créé manuellement\n`;
+        } catch (linkError) {
+          buildLog += `❌ Création symlink échouée: ${linkError.message}\n`;
         }
       }
     } catch {}
 
-    // ✅ CHECK 3: package vite existe?
+    // ✅ CHECK 4: Test d'exécution Vite
     try {
-      const viteCheck = await execCommand(
-        `cd ${deploymentDir} && npm list vite`
+      const viteVersion = await execCommand(
+        `cd ${deploymentDir} && node_modules/.bin/vite --version`
       );
-      buildLog += `📦 npm list vite:\n${viteCheck}\n`;
-    } catch (listError) {
-      buildLog += `⚠️ npm list vite échoué: ${listError.message}\n`;
-    }
+      buildLog += `✅ Vite version: ${viteVersion.trim()}\n`;
+    } catch (versionError) {
+      buildLog += `❌ Impossible d'exécuter vite: ${versionError.message}\n`;
 
-    // ✅ CHECK 4: Contenu node_modules/.bin/
-    try {
-      const binContents = await execCommand(
-        `ls -la ${deploymentDir}/node_modules/.bin/ | head -20`
-      );
-      buildLog += `📂 Binaires disponibles:\n${binContents}\n`;
-    } catch {}
+      // ✅ SOLUTION ULTIME: Utiliser npx avec téléchargement
+      buildLog += `🔧 Utilisation de npx comme fallback...\n`;
+      try {
+        const npxVersion = await execCommand(
+          `cd ${deploymentDir} && npx --yes vite@^5.2.11 --version`
+        );
+        buildLog += `✅ npx vite fonctionnel: ${npxVersion.trim()}\n`;
+      } catch (npxError) {
+        buildLog += `❌ npx vite échoué: ${npxError.message}\n`;
+      }
+    }
 
     await updateDeploymentLog(deploymentId, buildLog);
 
-    // ==================== BUILD (avec fallbacks) ====================
+    // ==================== BUILD AVEC MULTIPLES STRATÉGIES ====================
     buildLog += `🔨 Lancement du build...\n`;
 
-    const buildCommands = [
-      "npm run build",
-      "npx vite build",
-      "node_modules/.bin/vite build",
+    const buildStrategies = [
+      {
+        name: "npm run build",
+        cmd: "npm run build",
+      },
+      {
+        name: "vite direct",
+        cmd: "node_modules/.bin/vite build",
+      },
+      {
+        name: "npx vite",
+        cmd: "npx --yes vite@^5.2.11 build",
+      },
+      {
+        name: "vite global",
+        cmd: "vite build", // Utilise le Vite global du Dockerfile
+      },
     ];
 
     let buildSuccess = false;
     let buildError = null;
 
-    for (const cmd of buildCommands) {
+    for (const strategy of buildStrategies) {
       if (buildSuccess) break;
 
-      buildLog += `🔧 Essai: ${cmd}\n`;
+      buildLog += `\n🔧 Stratégie: ${strategy.name}\n`;
+      buildLog += `📋 Commande: ${strategy.cmd}\n`;
+
       try {
         const buildOutput = await execCommand(
-          `cd ${deploymentDir} && ${cmd}`,
+          `cd ${deploymentDir} && ${strategy.cmd}`,
           { NODE_ENV: "production" },
           300000
         );
-        buildLog += `✅ Build réussi avec: ${cmd}\n`;
+        buildLog += `✅ Build réussi avec: ${strategy.name}\n`;
         buildLog += `📊 Output:\n${buildOutput
           .split("\n")
-          .slice(-20)
+          .slice(-25)
           .join("\n")}\n`;
         buildSuccess = true;
       } catch (error) {
-        buildLog += `❌ Échec ${cmd}: ${error.message}\n`;
+        buildLog += `❌ Échec ${strategy.name}\n`;
+        buildLog += `📋 Erreur: ${error.message.substring(0, 500)}\n`;
         buildError = error;
       }
 
@@ -651,7 +700,18 @@ async function deployProject(deploymentId, project) {
     }
 
     if (!buildSuccess) {
-      buildLog += `❌ Tous les builds ont échoué\n`;
+      buildLog += `\n❌ TOUTES LES STRATÉGIES DE BUILD ONT ÉCHOUÉ\n`;
+      buildLog += `\n📋 Diagnostic:\n`;
+
+      // ✅ Diagnostic final
+      try {
+        const diagnostics = await execCommand(
+          `cd ${deploymentDir} && echo "=== NODE VERSION ===" && node --version && echo "\n=== NPM VERSION ===" && npm --version && echo "\n=== VITE CONFIG ===" && cat vite.config.js && echo "\n=== PACKAGE.JSON DEPS ===" && cat package.json | grep -A 20 '"devDependencies"'`
+        );
+        buildLog += diagnostics;
+      } catch {}
+
+      await updateDeploymentLog(deploymentId, buildLog);
       throw buildError;
     }
 
