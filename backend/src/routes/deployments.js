@@ -331,9 +331,35 @@ async function deployProject(deploymentId, project) {
   let buildLog = "";
   let primaryFramework = null;
 
+  // ✅ CONSTRUIRE L'URL DU REPOSITORY
+  const githubRepo = project.github_repo;
+
+  if (!githubRepo) {
+    console.error(`❌ Pas de github_repo pour le projet ${project.id}`);
+    await supabase
+      .from("deployments")
+      .update({
+        status: "failed",
+        build_log: "❌ Erreur: Repository GitHub manquant",
+        completed_at: new Date().toISOString(),
+      })
+      .eq("id", deploymentId);
+    return;
+  }
+
+  // ✅ Construire l'URL complète (avec gestion du token si disponible)
+  const githubToken = process.env.GITHUB_TOKEN;
+  const repoUrl = githubToken
+    ? `https://${githubToken}@github.com/${githubRepo}.git`
+    : `https://github.com/${githubRepo}.git`;
+
   // ✅ DEBUG: Vérifier le répertoire courant
   console.log(`🔍 [DEBUG] process.cwd(): ${process.cwd()}`);
   console.log(`🔍 [DEBUG] __dirname: ${__dirname}`);
+  console.log(`🔍 [DEBUG] GitHub Repo: ${githubRepo}`);
+  console.log(
+    `🔍 [DEBUG] Repository URL: ${repoUrl.replace(githubToken || "", "***")}`
+  );
 
   const deploymentDir = path.join("/app", "temp", deploymentId);
   const subdomain = project.name.toLowerCase().replace(/[^a-z0-9]/g, "-");
@@ -345,6 +371,7 @@ async function deployProject(deploymentId, project) {
     }\n`;
     buildLog += `📁 Temp dir: ${deploymentDir}\n`;
     buildLog += `📁 Output dir: ${outputDir}\n`;
+    buildLog += `📦 Repository: ${githubRepo}\n`;
 
     // ✅ DEBUG: Lister le contenu de /app/temp AVANT création
     try {
